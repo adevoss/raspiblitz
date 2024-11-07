@@ -28,7 +28,7 @@ actionString="Please wait - this can take some time"
 
 # formatting BLOCKCHAIN SYNC PROGRESS
 if [ "${btc_default_ready}" == "0" ] || [ "${btc_default_peers}" == "" ]; then
-    if [ ${system_count_start_blockchain} -gt 1 ]; then
+    if [ "${system_count_start_blockchain}" != "" ] && [ ${system_count_start_blockchain} -gt 1 ]; then
         syncProgress="${system_count_start_blockchain} restarts"
     else
         syncProgress="waiting for start"
@@ -47,7 +47,9 @@ source <(/home/admin/_cache.sh get \
     ln_default_ready \
     ln_default_sync_progress \
     ln_default_recovery_mode \
-    system_count_start_lightning \
+    ln_default_peers \
+    ln_default_sync_chain \
+    system_count_start_lightning
 )
 
 # formatting LIGHTNING SCAN PROGRESS  
@@ -64,6 +66,8 @@ if [ "${lightning}" != ""  ] && [ "${ln_default_sync_progress}" == "" ]; then
     fi
 elif [ "${ln_default_sync_progress}" == "100.00" ] && [ "${ln_default_recovery_mode}" == "1" ]; then
     scanProgress="recoverscan"
+elif [ "${ln_default_sync_progress}" == "100.00" ] && [ "${ln_default_sync_chain}" == "1" ]; then
+    scanProgress="100.00 % ${ln_default_peers} peers"
 elif [ ${#ln_default_sync_progress} -lt 6 ]; then
     scanProgress=" ${ln_default_sync_progress} %"
 else
@@ -84,10 +88,12 @@ fi
 source <(/home/admin/_cache.sh get \
     internet_localip \
     codeVersion \
+    codeRelease \
     system_temp_celsius \
     system_temp_fahrenheit \
     hostname \
     network \
+    hdd_used_info \
 )
 
 # set admin string
@@ -99,4 +105,9 @@ fi
 
 # display info to user
 time=$(date '+%H:%M:%S')
-dialog --title " Node is Syncing (${time}) " --backtitle "RaspiBlitz ${codeVersion} / ${system_temp_celsius}°C / ${system_temp_fahrenheit}°F / ${hostname}" --infobox "${infoStr}\n ${adminStr}" ${height} ${width}
+if [ "${vm}" == "0" ]; then
+    temp_info="${system_temp_celsius}°C ${system_temp_fahrenheit}°F"
+else
+    temp_info="VM"
+fi
+dialog --title " Node is Syncing (${time}) " --backtitle "${codeVersion}-${codeRelease} ${internet_localip} ${temp_info} ${hdd_used_info}" --infobox "${infoStr}\n ${adminStr}" ${height} ${width}

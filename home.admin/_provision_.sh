@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # check if run by root user
-if [ "$EUID" -ne 0 ]; then 
+if [ "$EUID" -ne 0 ]; then
   echo "error='run as root'"
   exit 1
 fi
- 
+
 # This script gets called from a fresh SD card
-# starting up that has an config file on HDD
-# from old RaspiBlitz or manufacturer to
+# starting up that has a config file on HDD
+# from old RaspiBlitz or manufacturer
 # to install and config services
 
 # LOGFILE - store debug logs of bootstrap
@@ -40,6 +40,7 @@ if [ ${configExists} -eq 0 ]; then
 fi
 
 # import config values
+source ${infoFile}
 source ${configFile}
 
 ##########################
@@ -52,12 +53,6 @@ echo "### BASIC SYSTEM SETTINGS ###" >> ${logFile}
 echo "# Make sure the user bitcoin is in the debian-tor group"
 usermod -a -G debian-tor bitcoin
 
-echo "# Optimizing log files: rotate daily, keep 1 week & compress old days " >> ${logFile}
-sed -i "s/^weekly/daily/g" /etc/logrotate.conf >> ${logFile} 2>&1
-sed -i "s/^rotate 4/rotate 7/g" /etc/logrotate.conf >> ${logFile} 2>&1
-sed -i "s/^#compress/compress/g" /etc/logrotate.conf >> ${logFile} 2>&1
-systemctl restart logrotate
-
 # make sure to have bitcoin core >=22 is backwards comp
 # see https://github.com/rootzoll/raspiblitz/issues/2546
 sed -i '/^deprecatedrpc=.*/d' /mnt/hdd/bitcoin/bitcoin.conf 2>/dev/null
@@ -65,6 +60,9 @@ echo "deprecatedrpc=addresses" >> /mnt/hdd/bitcoin/bitcoin.conf 2>/dev/null
 
 # backup SSH PubKeys
 /home/admin/config.scripts/blitz.ssh.sh backup
+
+# set timezone
+/home/admin/config.scripts/blitz.time.sh set-by-config >> ${logFile}
 
 # optimize mempool if RAM >1GB
 kbSizeRAM=$(cat /proc/meminfo | grep "MemTotal" | sed 's/[^0-9]*//g')
@@ -78,24 +76,22 @@ if [ ${kbSizeRAM} -gt 3500000 ]; then
 fi
 
 # zram on for all devices
-/home/admin/config.scripts/blitz.zram.sh on
+/home/admin/config.scripts/blitz.zram.sh on >> ${logFile}
 
 # link and copy HDD content into new OS on sd card
 echo "Copy HDD content for user admin" >> ${logFile}
-mkdir /home/admin/.${network} >> ${logFile} 2>&1
+mkdir /home/admin/.${network} >> ${logFile}
 cp /mnt/hdd/${network}/${network}.conf /home/admin/.${network}/${network}.conf >> ${logFile} 2>&1
-mkdir /home/admin/.lnd >> ${logFile} 2>&1
-cp /mnt/hdd/lnd/lnd.conf /home/admin/.lnd/lnd.conf >> ${logFile} 2>&1
-cp /mnt/hdd/lnd/tls.cert /home/admin/.lnd/tls.cert >> ${logFile} 2>&1
-mkdir /home/admin/.lnd/data >> ${logFile} 2>&1
+mkdir /home/admin/.lnd >> ${logFile}
+cp /mnt/hdd/lnd/lnd.conf /home/admin/.lnd/lnd.conf >> ${logFile}
+cp /mnt/hdd/lnd/tls.cert /home/admin/.lnd/tls.cert >> ${logFile}
+mkdir /home/admin/.lnd/data >> ${logFile}
 cp -r /mnt/hdd/lnd/data/chain /home/admin/.lnd/data/chain >> ${logFile} 2>&1
 chown -R admin:admin /home/admin/.${network} >> ${logFile} 2>&1
 chown -R admin:admin /home/admin/.lnd >> ${logFile} 2>&1
-cp /home/admin/assets/${network}d.service /etc/systemd/system/${network}d.service >> ${logFile} 2>&1
 cp /home/admin/assets/tmux.conf.local /mnt/hdd/.tmux.conf.local >> ${logFile} 2>&1
 chown admin:admin /mnt/hdd/.tmux.conf.local >> ${logFile} 2>&1
 ln -s -f /mnt/hdd/.tmux.conf.local /home/admin/.tmux.conf.local >> ${logFile} 2>&1
-
 
 # PREPARE LND (if activated)
 if [ "${lightning}" == "lnd" ] || [ "${lnd}" == "on" ]; then
@@ -150,6 +146,8 @@ echo "allow: bitcoin testnet"
 ufw allow 18333 comment 'bitcoin testnet'
 echo "allow: bitcoin mainnet"
 ufw allow 8333 comment 'bitcoin mainnet'
+echo 'allow: bitcoin mainnet RPC'
+ufw allow 8332 comment 'bitcoin mainnet RPC'
 echo 'allow: lightning testnet'
 ufw allow 19735 comment 'lightning testnet'
 echo "allow: lightning mainnet"
@@ -190,17 +188,43 @@ sed -i "s/^setupStep=.*/setupStep=100/g" /home/admin/raspiblitz.info
 ##########################
 # PROVISIONING SERVICES
 ##########################
-/home/admin/_cache.sh set message "Installing Services"
+
+echo "### CHECKING BLITZ-API/FRONT STATUS ###" >> ${logFile}
+blitzApiInstalled=$(systemctl status blitzapi | grep -c "loaded")
+echo "# blitzapi(${blitzapi}) blitzApiInstalled(${blitzApiInstalled})"
+if [ "${blitzapi}" != "on" ] && [ ${blitzApiInstalled} -gt 0 ]; then
+  /home/admin/_cache.sh set message "Deactivated API/WebUI (as in your config) - please use SSH for further setup"
+  sleep 10
+else
+  /home/admin/_cache.sh set message "Installing Services"
+fi
 
 # BLITZ WEB SERVICE
 echo "Provisioning BLITZ WEB SERVICE - run config script" >> ${logFile}
 /home/admin/config.scripts/blitz.web.sh https-on >> ${logFile} 2>&1
 
+# deinstall when not explizit 'on' when blitzapi is installed by fatpack
+# https://github.com/raspiblitz/raspiblitz/issues/4171#issuecomment-1728302628
+if [ "${blitzapi}" != "on" ] && [ ${blitzApiInstalled} -gt 0 ]; then
+  echo "blitz_api directory exists & blitzapi is not 'on' - deactivating blitz-api" >> ${logFile}
+  /home/admin/config.scripts/blitz.web.api.sh off >> ${logFile} 2>&1
+  /home/admin/config.scripts/blitz.web.ui.sh off >> ${logFile} 2>&1
+fi
+# WebAPI & UI (in case image was not fatpack - but webapi was switchen on)
+if [ "${blitzapi}" == "on" ] && [ $blitzApiInstalled -eq 0 ]; then
+    echo "Provisioning BlitzAPI - run config script" >> ${logFile}
+    /home/admin/_cache.sh set message "Setup BlitzAPI (takes time)"
+    /home/admin/config.scripts/blitz.web.api.sh on DEFAULT >> ${logFile} 2>&1
+    /home/admin/config.scripts/blitz.web.ui.sh on DEFAULT >> ${logFile} 2>&1
+else
+    echo "Provisioning BlitzAPI - keep default" >> ${logFile}
+fi
+
 echo "### RUNNING PROVISIONING SERVICES ###" >> ${logFile}
 
 # BITCOIN INTERIMS UPDATE
 if [ ${#bitcoinInterimsUpdate} -gt 0 ]; then
-  /home/admin/_cache.sh set message "Provisioning Bitcoin Core update"
+  /home/admin/_cache.sh set message "Bitcoin Core update"
   if [ "${bitcoinInterimsUpdate}" == "reckless" ]; then
     # recklessly update Bitcoin Core to latest release on GitHub
     echo "Provisioning Bitcoin Core reckless interims update" >> ${logFile}
@@ -215,11 +239,6 @@ if [ ${#bitcoinInterimsUpdate} -gt 0 ]; then
 else
   echo "Provisioning Bitcoin Core interims update - keep default" >> ${logFile}
 fi
-
-# I2P
-echo "Start i2pd" >> ${logFile}
-/home/admin/_cache.sh set message "i2pd setup"
-/home/admin/config.scripts/blitz.i2pd.sh on >> ${logFile}
 
 # LND INTERIMS UPDATE
 if [ ${#lndInterimsUpdate} -gt 0 ]; then
@@ -271,27 +290,9 @@ else
   echo "Provisioning CL interims update - keep default" >> ${logFile}
 fi
 
-# Bitcoin Testnet
-if [ "${testnet}" == "on" ]; then
-    echo "Provisioning ${network} Testnet - run config script" >> ${logFile}
-    /home/admin/config.scripts/bitcoin.install.sh on testnet >> ${logFile} 2>&1
-    systemctl start tbitcoind >> ${logFile} 2>&1
-else
-    echo "Provisioning ${network} Testnet - not active" >> ${logFile}
-fi
-
-# Bitcoin Signet
-if [ "${signet}" == "on" ]; then
-    echo "Provisioning ${network} Signet - run config script" >> ${logFile}
-    /home/admin/config.scripts/bitcoin.install.sh on signet >> ${logFile} 2>&1
-    systemctl start sbitcoind >> ${logFile} 2>&1
-else
-    echo "Provisioning ${network} Signet - not active" >> ${logFile}
-fi
-
 # LND binary install
 if [ "${lightning}" == "lnd" ] || [ "${lnd}" == "on" ] || [ "${tlnd}" == "on" ] || [ "${slnd}" == "on" ]; then
-  # if already installed by fatpack will skip 
+  # if already installed by fatpack will skip
   echo "Provisioning LND Binary - run config script" >> ${logFile}
   /home/admin/config.scripts/lnd.install.sh install >> ${logFile} 2>&1
 else
@@ -326,7 +327,7 @@ fi
 
 # CORE LIGHTNING binary install
 if [ "${lightning}" == "cl" ] || [ "${cl}" == "on" ] || [ "${tcl}" == "on" ] || [ "${scl}" == "on" ]; then
-  # if already installed by fatpack will skip 
+  # if already installed by fatpack will skip
   echo "Provisioning Core Lightning Binary - run config script" >> ${logFile}
   /home/admin/config.scripts/cl.install.sh install >> ${logFile} 2>&1
 else
@@ -367,26 +368,6 @@ else
     echo "Provisioning Tor - keep default" >> ${logFile}
 fi
 
-# WebAPI & UI (in case image was not fatpack - but webapi was switchen on)
-blitzApiInstalled=$(systemctl status blitzapi | grep -c "loaded")
-if [ "${blitzapi}" == "on" ] && [ $blitzApiInstalled -eq 0 ]; then
-    echo "Provisioning BlitzAPI - run config script" >> ${logFile}
-    /home/admin/_cache.sh set message "Setup BlitzAPI (takes time)"
-    /home/admin/config.scripts/blitz.web.api.sh on DEFAULT >> ${logFile} 2>&1    
-    /home/admin/config.scripts/blitz.web.ui.sh on DEFAULT >> ${logFile} 2>&1   
-else
-    echo "Provisioning BlitzAPI - keep default" >> ${logFile}
-fi
-
-# AUTO PILOT
-if [ "${autoPilot}" = "on" ]; then
-    echo "Provisioning AUTO PILOT - run config script" >> ${logFile}
-    /home/admin/_cache.sh set message "Setup AutoPilot"
-    /home/admin/config.scripts/lnd.autopilot.sh on >> ${logFile} 2>&1
-else
-    echo "Provisioning AUTO PILOT - keep default" >> ${logFile}
-fi
-
 # NETWORK UPNP
 if [ "${networkUPnP}" = "on" ]; then
     echo "Provisioning NETWORK UPnP - run config script" >> ${logFile}
@@ -423,15 +404,6 @@ else
     echo "Provisioning RTL CL - keep default" >> ${logFile}
 fi
 
-# SPARKO
-if [ "${sparko}" = "on" ]; then
-    echo "Provisioning Sparko - run config script" >> ${logFile}
-    /home/admin/_cache.sh set message "Setup SPARKO"
-    sudo -u admin /home/admin/config.scripts/cl-plugin.sparko.sh on mainnet >> ${logFile} 2>&1
-else
-    echo "Provisioning Sparko - keep default" >> ${logFile}
-fi
-
 # clHTTPplugin
 if [ "${clHTTPplugin}" = "on" ]; then
     echo "Provisioning clHTTPplugin - run config script" >> ${logFile}
@@ -459,24 +431,6 @@ else
     echo "Provisioning clWatchtowerClient - keep default" >> ${logFile}
 fi
 
-# SPARK
-if [ "${spark}" = "on" ]; then
-    echo "Provisioning Spark Wallet - run config script" >> ${logFile}
-    /home/admin/_cache.sh set message "Setup SPARK WALLET"
-    sudo -u admin /home/admin/config.scripts/cl.spark.sh on mainnet >> ${logFile} 2>&1
-else
-    echo "Provisioning Spark Wallet - keep default" >> ${logFile}
-fi
-
-#LOOP - install only if LiT won't be installed
-if [ "${loop}" = "on" ] && [ "${lit}" != "on" ]; then
-  echo "Provisioning Lightning Loop - run config script" >> ${logFile}
-  /home/admin/_cache.sh set message "Setup Lightning Loop"
-  sudo -u admin /home/admin/config.scripts/bonus.loop.sh on >> ${logFile} 2>&1
-else
-  echo "Provisioning Lightning Loop - keep default" >> ${logFile}
-fi
-
 #BTC RPC EXPLORER
 if [ "${BTCRPCexplorer}" = "on" ]; then
   echo "Provisioning BTCRPCexplorer - run config script" >> ${logFile}
@@ -495,6 +449,15 @@ else
   echo "Provisioning ElectRS - keep default" >> ${logFile}
 fi
 
+#FULCRUM
+if [ "${fulcrum}" = "on" ]; then
+  echo "Provisioning Fulcrum - run config script" >> ${logFile}
+  /home/admin/_cache.sh set message "Setup Fulcrum"
+  sudo -u admin /home/admin/config.scripts/bonus.fulcrum.sh on >> ${logFile} 2>&1
+else
+  echo "Provisioning Fulcrum - keep default" >> ${logFile}
+fi
+
 # BTCPAYSERVER
 if [ "${BTCPayServer}" = "on" ]; then
 
@@ -505,16 +468,6 @@ if [ "${BTCPayServer}" = "on" ]; then
 else
   echo "Provisioning BTCPayServer - keep default" >> ${logFile}
 fi
-
-# deprecated - see: #2031
-# LNDMANAGE
-#if [ "${lndmanage}" = "on" ]; then
-#  echo "Provisioning lndmanage - run config script" >> ${logFile}
-#  /home/admin/_cache.sh set message "Setup lndmanage"
-#  sudo -u admin /home/admin/config.scripts/bonus.lndmanage.sh on >> ${logFile} 2>&1
-#else
-#  echo "Provisioning lndmanage - not active" >> ${logFile}
-#fi
 
 # CUSTOM PORT
 echo "Provisioning LND Port" >> ${logFile}
@@ -562,7 +515,7 @@ fi
 if [ "${#zerotier}" -gt 0 ] && [ "${zerotier}" != "off" ]; then
     echo "Provisioning ZeroTier - run config script" >> ${logFile}
     /home/admin/_cache.sh set message "Setup ZeroTier"
-    /home/admin/config.scripts/bonus.zerotier.sh on ${zerotier} >> ${logFile} 2>&1
+    /home/admin/config.scripts/internet.zerotier.sh on ${zerotier} >> ${logFile} 2>&1
 else
     echo "Provisioning ZeroTier - not active" >> ${logFile}
 fi
@@ -580,14 +533,14 @@ else
   echo "Provisioning LCD rotate - not needed, keep default rotate on" >> ${logFile}
 fi
 
-# TOUCHSCREEN
-if [ "${#touchscreen}" -gt 0 ]; then
-    echo "Provisioning Touchscreen - run config script" >> ${logFile}
-    /home/admin/_cache.sh set message "Setup Touchscreen"
-    /home/admin/config.scripts/blitz.touchscreen.sh ${touchscreen} >> ${logFile} 2>&1
-else
-    echo "Provisioning Touchscreen - not active" >> ${logFile}
-fi
+# TOUCHSCREEN - deactivated see https://github.com/raspiblitz/raspiblitz/pull/4609#issuecomment-2144406124
+# if [ "${#touchscreen}" -gt 0 ]; then
+#     echo "Provisioning Touchscreen - run config script" >> ${logFile}
+#     /home/admin/_cache.sh set message "Setup Touchscreen"
+#     /home/admin/config.scripts/blitz.touchscreen.sh ${touchscreen} >> ${logFile} 2>&1
+# else
+#     echo "Provisioning Touchscreen - not active" >> ${logFile}
+# fi
 
 # UPS
 if [ "${#ups}" -gt 0 ]; then
@@ -637,15 +590,6 @@ else
   echo "Provisioning Specter - keep default" >> ${logFile}
 fi
 
-# Faraday
-if [ "${faraday}" = "on" ]; then
-  echo "Provisioning Faraday - run config script" >> ${logFile}
-  /home/admin/_cache.sh set message "Setup Faraday"
-  sudo -u admin /home/admin/config.scripts/bonus.faraday.sh on >> ${logFile} 2>&1
-else
-  echo "Provisioning Faraday - keep default" >> ${logFile}
-fi
-
 # BOS
 if [ "${bos}" = "on" ]; then
   echo "Provisioning Balance of Satoshis - run config script" >> ${logFile}
@@ -653,15 +597,6 @@ if [ "${bos}" = "on" ]; then
   sudo -u admin /home/admin/config.scripts/bonus.bos.sh on >> ${logFile} 2>&1
 else
   echo "Provisioning Balance of Satoshis - keep default" >> ${logFile}
-fi
-
-# LNPROXY
-if [ "${lnproxy}" = "on" ]; then
-  echo "Provisioning lnproxy - run config script" >> ${logFile}
-  /home/admin/_cache.sh set message "Setup lnproxy"
-  sudo -u admin /home/admin/config.scripts/bonus.lnproxy.sh on >> ${logFile} 2>&1
-else
-  echo "Provisioning lnproxy - keep default" >> ${logFile}
 fi
 
 # thunderhub
@@ -686,7 +621,7 @@ fi
 if [ "${letsencrypt}" = "on" ]; then
   echo "Provisioning letsencrypt - run config script" >> ${logFile}
   /home/admin/_cache.sh set message "Setup letsencrypt"
-  sudo -u admin /home/admin/config.scripts/bonus.letsencrypt.sh on >> ${logFile} 2>&1
+  sudo -u admin /home/admin/config.scripts/internet.letsencrypt.sh on >> ${logFile} 2>&1
 else
   echo "Provisioning letsencrypt - keep default" >> ${logFile}
 fi
@@ -718,15 +653,6 @@ else
   echo "Provisioning Stacking Sats Kraken - keep default" >> ${logFile}
 fi
 
-# Pool - install only if LiT won't be installed
-if [ "${pool}" = "on" ] && [ "${lit}" != "on" ]; then
-  echo "Provisioning Pool - run config script" >> ${logFile}
-  /home/admin/_cache.sh set message "Setup Pool"
-  sudo -u admin /home/admin/config.scripts/bonus.pool.sh on >> ${logFile} 2>&1
-else
-  echo "Provisioning Pool - keep default" >> ${logFile}
-fi
-
 # lit (make sure to be installed after RTL)
 if [ "${lit}" = "on" ]; then
   echo "Provisioning LIT - run config script" >> ${logFile}
@@ -736,6 +662,15 @@ else
   echo "Provisioning LIT - keep default" >> ${logFile}
 fi
 
+# labelbase
+if [ "${labelbase}" = "on" ]; then
+  echo "Provisioning Labelbase - run config script" >> ${logFile}
+  /home/admin/_cache.sh set message "Setup Labelbase"
+  sudo -u admin /home/admin/config.scripts/bonus.labelbase.sh on >> ${logFile} 2>&1
+else
+  echo "Provisioning Labelbase - keep default" >> ${logFile}
+fi
+
 # lndg
 if [ "${lndg}" = "on" ]; then
   echo "Provisioning LNDg - run config script" >> ${logFile}
@@ -743,15 +678,6 @@ if [ "${lndg}" = "on" ]; then
   sudo -u admin /home/admin/config.scripts/bonus.lndg.sh on >> ${logFile} 2>&1
 else
   echo "Provisioning LNDg - keep default" >> ${logFile}
-fi
-
-# sphinxrelay
-if [ "${sphinxrelay}" = "on" ]; then
-  echo "Sphinx-Relay - run config script" >> ${logFile}
-  /home/admin/_cache.sh set message "Setup Sphinx-Relay"
-  sudo -u admin /home/admin/config.scripts/bonus.sphinxrelay.sh on >> ${logFile} 2>&1
-else
-  echo "Sphinx-Relay - keep default" >> ${logFile}
 fi
 
 # helipad
@@ -772,49 +698,13 @@ else
   echo "Provisioning CircuitBreaker - keep default" >> ${logFile}
 fi
 
-# homer
-if [ "${homer}" = "on" ]; then
-  echo "Provisioning Homer - run config script" >> ${logFile}
-  sudo sed -i "s/^message=.*/message='Setup Homer'/g" ${infoFile}
-  sudo -u admin /home/admin/config.scripts/bonus.homer.sh on >> ${logFile} 2>&1
-else
-  echo "Provisioning Homer - keep default" >> ${logFile}
-fi
-
-# tallycoin_connect
-if [ "${tallycoinConnect}" = "on" ]; then
-  echo "Provisioning Tallycoin Connect - run config script" >> ${logFile}
-  /home/admin/_cache.sh set message "Setup Tallycoin Connect"
-  sudo -u admin /home/admin/config.scripts/bonus.tallycoin-connect.sh on >> ${logFile} 2>&1
-else
-  echo "Provisioning Tallycoin Connect - keep default" >> ${logFile}
-fi
-
-# bitcoinminds.org
-if [ "${bitcoinminds}" = "on" ]; then
-  echo "Provisioning bitcoinminds.org - run config script" >> ${logFile}
-  /home/admin/_cache.sh set message "Setup Bitcoinminds.org"
-  sudo -u admin /home/admin/config.scripts/bonus.bitcoinminds.sh on >> ${logFile} 2>&1
-else
-  echo "Provisioning bitcoinminds.org - keep default" >> ${logFile}
-fi
-
 # squeaknode
 if [ "${squeaknode}" = "on" ]; then
   echo "Provisioning Squeaknode - run config script" >> ${logFile}
-  sudo sed -i "s/^message=.*/message='Setup Squeaknode '/g" ${infoFile}
+  /home/admin/_cache.sh set message "Setup Squeaknode"
   sudo -u admin /home/admin/config.scripts/bonus.squeaknode.sh on >> ${logFile} 2>&1
 else
   echo "Provisioning Squeaknode - keep default" >> ${logFile}
-fi
-
-# itchysats
-if [ "${itchysats}" = "on" ]; then
-  echo "Provisioning ItchySats - run config script" >> ${logFile}
-  sudo sed -i "s/^message=.*/message='Setup ItchySats'/g" ${infoFile}
-  sudo -u admin /home/admin/config.scripts/bonus.itchysats.sh on --download >> ${logFile} 2>&1
-else
-  echo "ItchySats - keep default" >> ${logFile}
 fi
 
 # LightningTipBot
@@ -833,6 +723,33 @@ if [ "${fints}" = "on" ]; then
   sudo -u admin /home/admin/config.scripts/bonus.fints.sh on >> ${logFile} 2>&1
 else
   echo "Provisioning FinTS - keep default" >> ${logFile}
+fi
+
+# Tailscale
+if [ "${tailscale}" = "on" ]; then
+  echo "Provisioning Tailscale - run config script" >> ${logFile}
+  /home/admin/_cache.sh set message "Setup Tailscale"
+  sudo -u admin /home/admin/config.scripts/internet.tailscale.sh on >> ${logFile} 2>&1
+else
+  echo "Provisioning Tailscale - keep default" >> ${logFile}
+fi
+
+# Telegraf
+if [ "${telegraf}" = "on" ]; then
+  echo "Provisioning Telegraf - run config script" >> ${logFile}
+  /home/admin/_cache.sh set message "Setup Telegraf"
+  sudo -u admin /home/admin/config.scripts/bonus.telegraf.sh on >> ${logFile} 2>&1
+else
+  echo "Provisioning Telegraf - keep default" >> ${logFile}
+fi
+
+# Publipool
+if [ "${publicpool}" = "on" ]; then
+  echo "Provisioning Publicpool - run config script" >> ${logFile}
+  /home/admin/_cache.sh set message "Setup Publicpool"
+  sudo -u admin /home/admin/config.scripts/bonus.publicpool.sh on >> ${logFile} 2>&1
+else
+  echo "Provisioning Publicpool - keep default" >> ${logFile}
 fi
 
 # custom install script from user
@@ -863,7 +780,7 @@ if [ -d "/var/cache/raspiblitz/tls_backup" ]; then
   cp /var/cache/raspiblitz/tls_backup/tls.cert /mnt/hdd/lnd/tls.cert >> ${logFile} 2>&1
   cp /var/cache/raspiblitz/tls_backup/tls.key /mnt/hdd/lnd/tls.key >> ${logFile} 2>&1
   chown -R bitcoin:bitcoin /mnt/hdd/lnd >> ${logFile} 2>&1
-  echo "On next final restart admin creds will be updated by _boostrap.sh" >> ${logFile}
+  echo "On next final restart admin creds will be updated by _bootstrap.sh" >> ${logFile}
 
   echo "DONE" >> ${logFile}
 else
@@ -879,6 +796,15 @@ if [ ${confExists} -eq 0 ]; then
   cp /home/admin/assets/bitcoin.conf /mnt/hdd/bitcoin/bitcoin.conf
   chown bitcoin:bitcoin /mnt/hdd/bitcoin/bitcoin.conf
 fi
+
+# I2P
+echo "Start i2pd" >> ${logFile}
+/home/admin/_cache.sh set message "i2pd setup"
+/home/admin/config.scripts/blitz.i2pd.sh on >> ${logFile}
+
+# clean up raspiblitz config from old settings
+sed -i '/^autoPilot=/d' /mnt/hdd/raspiblitz.conf
+sed -i '/^lndKeysend=/d' /mnt/hdd/raspiblitz.conf
 
 # signal setup done
 /home/admin/_cache.sh set message "Setup Done"
@@ -927,12 +853,12 @@ echo "Make sure main services are running .." >> ${logFile}
 systemctl start ${network}d
 if [ "${lightning}" == "lnd" ];then
   systemctl start lnd
+  sleep 10
   # set password c if given in flag from migration prep
   passwordFlagExists=$(ls /mnt/hdd/passwordc.flag | grep -c "passwordc.flag")
   if [ "${passwordFlagExists}" == "1" ]; then
     echo "Found /mnt/hdd/passwordc.flag .. changing password" >> ${logFile}
     oldPasswordC=$(cat /mnt/hdd/passwordc.flag)
-    if ! pip list | grep grpc; then sudo -H python3 -m pip install grpcio==1.38.1; fi
     /home/admin/config.scripts/lnd.initwallet.py change-password mainnet "${oldPasswordC}" "${passwordC}" >> ${logFile}
     shred -u /mnt/hdd/passwordc.flag
   else

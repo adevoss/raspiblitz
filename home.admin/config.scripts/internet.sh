@@ -67,7 +67,7 @@ localip_ALL=$(hostname -I | awk '{print $1}')
 if [ $(isValidIP ${localip_ALL}) -eq 0 ]; then
   localip_ALL=""
 fi
-localip_LAN=$(ip addr 2>/dev/null | grep 'state UP' -A2 | grep -E -v 'docker0|veth' | grep -E -i '(*[eth][0-9]$)*' | tail -n1 | awk '{print $2}' | cut -f1 -d'/')
+localip_LAN=$(ip addr 2>/dev/null | grep 'state UP' -A2 | grep -E -v 'docker0|veth' | grep -E -i '([eth][0-9]$)*' | tail -n1 | awk '{print $2}' | cut -f1 -d'/')
 if [ $(isValidIP ${localip_LAN}) -eq 0 ]; then
   localip_LAN=""
 fi
@@ -79,7 +79,7 @@ fi
 
 #############################################
 # get local IP Range
-localiprange=$(ip addr | grep 'state UP' -A2 | grep -E -v 'docker0|veth' | grep 'eth0\|wlan0\|enp0\|inet' | tail -n1 | awk '{print $2}' | awk -F. '{print $1"."$2"."$3".0/24"}')
+localiprange=$(ip -o -4 addr show ${networkDevice} | awk '/scope global/ {split($4,ip,"/"); split(ip[1],octets,"."); printf "%s.%s.%s.0/%s\n", octets[1], octets[2], octets[3], ip[2]}')
 
 #############################################
 # check DHCP

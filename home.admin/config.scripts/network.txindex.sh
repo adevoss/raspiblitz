@@ -30,7 +30,14 @@ if [ "$1" = "status" ]; then
 
   echo "##### STATUS TXINDEX"
 
-  indexByteSize=$(sudo du -s /mnt/hdd/bitcoin/indexes/txindex 2>/dev/null | cut -f1)
+  # check user is root
+  if [ "$EUID" -ne 0 ]; then
+    logger "FAIL: network.txindex.sh status needs sudo"
+    echo "error='missing sudo'"
+    exit 1
+  fi
+
+  indexByteSize=$(du -s /mnt/hdd/bitcoin/indexes/txindex 2>/dev/null | cut -f1)
   if [ "${indexByteSize}" == "" ]; then
     indexByteSize=0
   fi
@@ -44,8 +51,8 @@ if [ "$1" = "status" ]; then
   # try to gather if still indexing
   source <(/home/admin/_cache.sh get btc_mainnet_blocks_headers)
   blockchainHeight="${btc_mainnet_blocks_headers}"
-  indexedToBlock=$(sudo tail -n 200 /mnt/hdd/${network}${pathAdd}/debug.log | grep "Syncing txindex with block chain from height" | tail -n 1 | cut -d " " -f 9 | sed 's/[^0-9]*//g')
-  indexFinished=$(sudo tail -n 200 /mnt/hdd/${network}${pathAdd}/debug.log | grep -c "txindex is enabled at height")
+  indexedToBlock=$(tail -n 200 /mnt/hdd/${network}${pathAdd}/debug.log | grep "Syncing txindex with block chain from height" | tail -n 1 | cut -d " " -f 9 | sed 's/[^0-9]*//g')
+  indexFinished=$(tail -n 200 /mnt/hdd/${network}${pathAdd}/debug.log | grep -c "txindex is enabled at height")
 
   if [ ${#indexedToBlock} -eq 0 ] || [ ${indexFinished} -gt 0 ] || [ "${indexedToBlock}" = "${blockchainHeight}" ]; then
     echo "isIndexed=1"
@@ -54,13 +61,16 @@ if [ "$1" = "status" ]; then
     indexInfo="OK"
   else
     echo "isIndexed=0"
+    progressPercent="0.00%"
     if [ ${#indexedToBlock} -gt 0 ] && [ ${#blockchainHeight} -gt 0 ]; then
-      progressPercent=$(printf %.2f $(echo "${indexedToBlock}/${blockchainHeight}*100" | bc -l))
+      progressPercentRaw=$(echo "${indexedToBlock}/${blockchainHeight}*100" | bc -l 2>/dev/null)
+      progressPercent=$(printf "%.2f" "${progressPercentRaw}" 2>/dev/null)
       indexInfo="Building ${progressPercent}% (please wait)"
     else
       indexInfo="Building (please wait)"
     fi
     echo "indexInfo='${indexInfo}'"
+    echo "indexPrecent='${progressPercent}'"
   fi  
 
   echo "indexFinished=${indexFinished}"

@@ -89,14 +89,11 @@ fi
 if [ "${lndg}" == "on" ]; then
   OPTIONS+=(LNDG "LNDg (auto-rebalance, auto-fees)")
 fi
-if [ "${sparko}" == "on" ]; then
-  OPTIONS+=(SPARKO "Sparko Webwallet")
-fi
-if [ "${spark}" == "on" ]; then
-  OPTIONS+=(SPARK "Spark Wallet")
-fi
 if [ "${ElectRS}" == "on" ]; then
   OPTIONS+=(ELECTRS "Electrum Rust Server")
+fi
+if [ "${fulcrum}" == "on" ]; then
+  OPTIONS+=(FULCRUM "Fulcrum Electrum Server")
 fi
 if [ "${BTCRPCexplorer}" == "on" ]; then
   OPTIONS+=(EXPLORE "BTC RPC Explorer")
@@ -113,6 +110,9 @@ if [ "${lndmanage}" == "on" ]; then
 fi
 if [ "${loop}" == "on" ]; then
   OPTIONS+=(LOOP "Loop In/Out Service")
+fi
+if [ "${lndk}" == "on" ]; then
+  OPTIONS+=(LNDK "LND BOLT 12 privacy")
 fi
 if [ "${mempoolExplorer}" == "on" ]; then
   OPTIONS+=(MEMPOOL "Mempool Space")
@@ -132,9 +132,9 @@ fi
 if [ "${bos}" == "on" ]; then
   OPTIONS+=(BOS "Balance of Satoshis")
 fi
-if [ "${lnproxy}" == "on" ]; then
-  OPTIONS+=(LNPROXY "lnproxy server")
-fi
+#if [ "${lnproxy}" == "on" ]; then
+#  OPTIONS+=(LNPROXY "lnproxy server")
+#fi
 if [ "${pyblock}" == "on" ]; then
   OPTIONS+=(PYBLOCK "PyBlock")
 fi
@@ -156,27 +156,29 @@ fi
 if [ "${chantools}" == "on" ]; then
   OPTIONS+=(CHANTOOLS "ChannelTools (Fund Rescue)")
 fi
-if [ "${homer}" == "on" ]; then
-  OPTIONS+=(HOMER "Homer Dashboard")
-  CHOICE_HEIGHT=$((CHOICE_HEIGHT+1))
-fi
 if [ "${circuitbreaker}" == "on" ]; then
   OPTIONS+=(CIRCUITBREAKER "Circuitbreaker (LND firewall)")
 fi
-if [ "${tallycoinConnect}" == "on" ]; then
-  OPTIONS+=(TALLY "Tallycoin Connect")
-fi
 if [ "${squeaknode}" == "on" ]; then
   OPTIONS+=(SQUEAKNODE "Squeaknode")
-fi
-if [ "${itchysats}" == "on" ]; then
-  OPTIONS+=(ITCHYSATS "Show ItchySats details")
 fi
 if [ "${lightningtipbot}" == "on" ]; then
   OPTIONS+=(LIGHTNINGTIPBOT "Show LightningTipBot details")
 fi
 if [ "${fints}" == "on" ]; then
   OPTIONS+=(FINTS "Show FinTS/HBCI details")
+fi
+if [ "${labelbase}" == "on" ]; then
+  OPTIONS+=(LABELBASE "Labelbase (UTXO labeling)")
+fi
+if [ "${publicpool}" == "on" ]; then
+  OPTIONS+=(PUBLICPOOL "Public Pool (Bitcoin Solo Mining)")
+fi
+if [ "${tailscale}" == "on" ]; then
+  OPTIONS+=(TAILSCALE "Tailscale VPN")
+fi
+if [ "${telegraf}" == "on" ]; then
+  OPTIONS+=(TELEGRAF "Telegraf InfluxDB/Grafana Metrics")
 fi
 
 # dont offer to switch to "testnet view for now" - so no wswitch back to mainnet needed
@@ -272,17 +274,14 @@ case $CHOICE in
         ELECTRS)
             /home/admin/config.scripts/bonus.electrs.sh menu
             ;;
+        FULCRUM)
+            /home/admin/config.scripts/bonus.fulcrum.sh menu
+            ;;
         LIT)
             /home/admin/config.scripts/bonus.lit.sh menu
             ;;
         LNDG)
             /home/admin/config.scripts/bonus.lndg.sh menu
-            ;;
-        SPARKO)
-            /home/admin/config.scripts/cl-plugin.sparko.sh menu mainnet
-            ;;
-        SPARK)
-            /home/admin/config.scripts/cl.spark.sh menu mainnet
             ;;
         LNBITS)
             /home/admin/config.scripts/bonus.lnbits.sh menu
@@ -290,11 +289,11 @@ case $CHOICE in
         LNDMANAGE)
             /home/admin/config.scripts/bonus.lndmanage.sh menu
             ;;
+        LNDK)
+            /home/admin/config.scripts/bonus.lndk.sh menu
+            ;;
         LIGHTNINGTIPBOT)
             /home/admin/config.scripts/bonus.lightningtipbot.sh menu
-            ;;
-        LOOP)
-            /home/admin/config.scripts/bonus.loop.sh menu
             ;;
         MEMPOOL)
             /home/admin/config.scripts/bonus.mempool.sh menu
@@ -308,9 +307,6 @@ case $CHOICE in
         JAM)
             /home/admin/config.scripts/bonus.jam.sh menu
             ;;
-        FARADAY)
-            sudo /home/admin/config.scripts/bonus.faraday.sh menu
-            ;;
         BOS)
             sudo /home/admin/config.scripts/bonus.bos.sh menu
             ;;
@@ -323,14 +319,8 @@ case $CHOICE in
         THUB)
             sudo /home/admin/config.scripts/bonus.thunderhub.sh menu
             ;;
-        TALLY)
-            sudo /home/admin/config.scripts/bonus.tallycoin-connect.sh menu
-            ;;
         ZEROTIER)
-            sudo /home/admin/config.scripts/bonus.zerotier.sh menu
-            ;;
-        POOL)
-            sudo /home/admin/config.scripts/bonus.pool.sh menu
+            sudo /home/admin/config.scripts/internet.zerotier.sh menu
             ;;
         SPHINX)
             sudo /home/admin/config.scripts/bonus.sphinxrelay.sh menu
@@ -350,6 +340,18 @@ case $CHOICE in
         CIRCUITBREAKER)
             sudo /home/admin/config.scripts/bonus.circuitbreaker.sh menu
             ;;
+        LABELBASE)
+            sudo /home/admin/config.scripts/bonus.labelbase.sh menu
+            ;;
+        PUBLICPOOL)
+            /home/admin/config.scripts/bonus.publicpool.sh menu
+            ;;
+        TAILSCALE)
+            sudo /home/admin/config.scripts/internet.tailscale.sh menu
+            ;;
+        TELEGRAF)
+            /home/admin/config.scripts/bonus.telegraf.sh menu
+            ;;
         FINTS)
             sudo /home/admin/config.scripts/bonus.fints.sh menu
             ;;
@@ -358,9 +360,6 @@ case $CHOICE in
             ;;
         SUBSCRIBE)
             /home/admin/config.scripts/blitz.subscriptions.py
-            ;;
-        HOMER)
-            sudo /home/admin/config.scripts/bonus.homer.sh menu
             ;;
         SERVICES)
             /home/admin/00settingsMenuServices.sh

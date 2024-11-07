@@ -4,12 +4,12 @@
 ## based on https://raspibolt.github.io/raspibolt/raspibolt_40_lnd.html#lightning-lnd
 ## see LND releases: https://github.com/lightningnetwork/lnd/releases
 ### If you change here - make sure to also change interims version in lnd.update.sh #!
-lndVersion="0.16.2-beta"
+lndVersion="0.17.5-beta"
 
 # olaoluwa
-#PGPauthor="roasbeef"
-#PGPpkeys="https://keybase.io/roasbeef/pgp_keys.asc"
-#PGPcheck="E4D85299674B2D31FAA1892E372CBD7633C61696"
+# PGPauthor="roasbeef"
+# PGPpkeys="https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/roasbeef.asc"
+# PGPcheck="A5B61896952D9FDA83BC054CDC42612E89237182"
 
 # guggero
 PGPauthor="guggero"
@@ -89,7 +89,7 @@ if [ "$1" = "install" ] ; then
   # check if lnd binary is already installed
   if [ $(sudo -u admin lnd --version 2>/dev/null| grep -c 'lnd') -gt 0 ]; then
     echo "lnd binary already installed - done"
-    exit 1
+    exit 
   fi
 
   # get LND resources
@@ -302,16 +302,23 @@ listen=0.0.0.0:${portprefix}9735
 rpclisten=0.0.0.0:1${rpcportmod}009
 restlisten=0.0.0.0:${portprefix}8080
 nat=false
-debuglevel=debug
+debuglevel=info
 gc-canceled-invoices-on-startup=true
 gc-canceled-invoices-on-the-fly=true
 ignore-historical-gossip-filters=1
-sync-freelist=true
 stagger-initial-reconnect=true
 tlsautorefresh=1
 tlsdisableautofill=1
 tlscertpath=/home/bitcoin/.lnd/tls.cert
 tlskeypath=/home/bitcoin/.lnd/tls.key
+
+# Set to false for nodes with larger amount of channels. This modification leads to increased 
+# latency during initialization, yet significantly boosts runtime performance of the daemon.
+sync-freelist=true
+
+# Specify the maximum number of logfiles retained in rotation and the threshold size for rotation initiation.
+maxlogfiles=5
+maxlogfilesize=400
 
 [Bitcoin]
 bitcoin.active=1
@@ -337,6 +344,7 @@ Description=Lightning Network Daemon on $CHAIN
 # Make sure lnd starts after bitcoind is ready
 Requires=${netprefix}bitcoind.service
 After=${netprefix}bitcoind.service
+PartOf=${netprefix}bitcoind.service
 
 [Service]
 EnvironmentFile=/mnt/hdd/raspiblitz.conf
@@ -350,8 +358,8 @@ PIDFile=/home/bitcoin/.lnd/${netprefix}lnd.pid
 User=bitcoin
 Group=bitcoin
 
-# Try restarting lnd if it stops due to a failure
-Restart=on-failure
+# Try to restart lnd always
+Restart=always
 RestartSec=60
 
 # Type=notify is required for lnd to notify systemd when it is ready
@@ -422,7 +430,6 @@ alias ${netprefix}lndconf=\"sudo nano /home/bitcoin/.lnd/${netprefix}lnd.conf\"\
       else
         passwordC="raspiblitz"
       fi
-      if ! pip list | grep grpc; then sudo -H python3 -m pip install grpcio==1.38.1; fi
       source <(sudo /home/admin/config.scripts/lnd.initwallet.py new ${CHAIN} ${passwordC})
       if [ "${err}" != "" ]; then
         clear
@@ -483,6 +490,7 @@ alias ${netprefix}lndconf=\"sudo nano /home/bitcoin/.lnd/${netprefix}lnd.conf\"\
   fi
 
   # needed to make lnd.newwallet.py work
+  pip config set global.break-system-packages true
   pip install --upgrade google-api-python-client
 
   exit 0

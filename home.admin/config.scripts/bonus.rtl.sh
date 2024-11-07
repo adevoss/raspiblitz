@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # https://github.com/Ride-The-Lightning/RTL/releases
-RTLVERSION="v0.13.6"
+RTLVERSION="v0.15.2"
 
 # check and load raspiblitz config
 # to know which network is running
@@ -10,7 +10,7 @@ source /mnt/hdd/raspiblitz.conf
 # command info
 if [ $# -eq 0 ] || [ "$1" = "-h" ] || [ "$1" = "-help" ]; then
   echo "# config script for RideTheLightning $RTLVERSION WebInterface"
-  echo "# able to run intances for lnd and cl parallel"
+  echo "# able to run separate instances for lnd and cl parallel"
   echo "# mainnet and testnet instances can run parallel"
   echo "# bonus.rtl.sh [install|uninstall]"
   echo "# bonus.rtl.sh [on|off|menu] <lnd|cl> <mainnet|testnet|signet> <purge>"
@@ -45,11 +45,19 @@ elif [ "${LNTYPE}" == "lnd" ]; then
 fi
 echo "# RTLHTTP(${RTLHTTP})"
 
-# construct needed varibale elements
+# construct needed variable elements
 configEntry="${netprefix}${typeprefix}rtlWebinterface"
 systemdService="${netprefix}${typeprefix}RTL"
+dependsOn="bitcoind"
+if [ "${LNTYPE}" == "cl" ]; then
+  dependsOn="${netprefix}lightningd"
+elif [ "${LNTYPE}" == "lnd" ]; then
+  dependsOn="${netprefix}lnd"
+fi
+
 echo "# configEntry(${configEntry})"
 echo "# systemdService(${systemdService})"
+echo "# dependsOn(${dependsOn})"
 
 ##########################
 # MENU
@@ -136,14 +144,16 @@ if [ "$1" = "install" ]; then
 
   # create rtl user (one for all instances)
   if [ $(compgen -u | grep -c rtl) -eq 0 ]; then
-    sudo adduser --disabled-password --gecos "" rtl || exit 1
+    sudo adduser --system --group --home /home/rtl rtl || exit 1
   fi
+
+  sudo usermod -a -G bitcoin rtl
 
   # download source code and set to tag release
   echo "# Get the RTL Source Code"
   sudo -u rtl rm -rf /home/rtl/RTL 2>/dev/null
-  sudo -u rtl git clone https://github.com/ShahanaFarooqui/RTL.git /home/rtl/RTL
-  cd /home/rtl/RTL
+  sudo -u rtl git clone https://github.com/Ride-The-Lightning/RTL.git /home/rtl/RTL
+  cd /home/rtl/RTL || exit 1
   # check https://github.com/Ride-The-Lightning/RTL/releases/
   sudo -u rtl git reset --hard $RTLVERSION
 
@@ -155,7 +165,7 @@ if [ "$1" = "install" ]; then
     echo "# OK - RTL code copy looks good"
   else
     echo "# FAIL - RTL code not available"
-    echo "err='code download falied'"
+    echo "err='code download failed'"
     exit 1
   fi
 
@@ -227,14 +237,18 @@ if [ "$1" = "1" ] || [ "$1" = "on" ]; then
     exit 1
   fi
 
-  # make sure softwarte is installed
+  # make sure software is installed
   if [ -f /home/rtl/RTL/LICENSE ]; then
     echo "# OK - the RTL code is already present"
   else
     echo "# install of codebase is needed first"
-    /home/admin/config.scripts/bonus.rtl.sh install || exit 1
+    if ! /home/admin/config.scripts/bonus.rtl.sh install; then
+      echo "# FAIL - install of RTL code failed, setting ${configEntry} off in the raspiblitz.conf"
+      /home/admin/config.scripts/blitz.conf.sh set ${configEntry} "off"
+      exit 1
+    fi
   fi
-  cd /home/rtl/RTL
+  cd /home/rtl/RTL || exit 1
 
   echo "# Activating RTL for ${LNTYPE} ${CHAIN}"
 
@@ -265,8 +279,9 @@ if [ "$1" = "1" ] || [ "$1" = "on" ]; then
 
 [Unit]
 Description=${systemdService} Webinterface
-Wants=
-After=
+Wants=${dependsOn}.service
+After=${dependsOn}.service
+PartOf=${dependsOn}.service
 
 [Service]
 Environment=\"RTL_CONFIG_PATH=/mnt/hdd/app-data/rtl/${systemdService}/\"
@@ -291,20 +306,21 @@ WantedBy=multi-user.target
 " | sudo tee /etc/systemd/system/${systemdService}.service
   sudo chown root:root /etc/systemd/system/${systemdService}.service
 
-  # adapt systemd service template for LND
-  if [ "${LNTYPE}" == "lnd" ]; then
-    echo "# modifying ${systemdService}.service for LND"
-    sudo sed -i "s/^Wants=.*/Wants=${netprefix}lnd.service/g" /etc/systemd/system/${systemdService}.service
-    sudo sed -i "s/^After=.*/After=${netprefix}lnd.service/g" /etc/systemd/system/${systemdService}.service
-  fi
-  # adapt systemd service template for
+  # set up clnrest
   if [ "${LNTYPE}" == "cl" ]; then
     echo "# modifying ${systemdService}.service for CL"
     sudo sed -i "s/^Wants=.*/Wants=${netprefix}lightningd.service/g" /etc/systemd/system/${systemdService}.service
     sudo sed -i "s/^After=.*/After=${netprefix}lightningd.service/g" /etc/systemd/system/${systemdService}.service
 
-    # set up Core LightningREST
-    /home/admin/config.scripts/cl.rest.sh on ${CHAIN}
+    # set up clnrest
+    /home/admin/config.scripts/cl-plugin.clnrest.sh on ${CHAIN}
+
+    # for CLN make sure user rtl is allowed to create and access admin runes
+    echo "# adding user rtl to group bitcoin"
+    sudo /usr/sbin/usermod --append --groups bitcoin rtl
+    echo "# symlink .lightning to rtl home"
+    sudo rm -rf /home/rtl/.lightning
+    sudo ln -s /mnt/hdd/app-data/.lightning /home/rtl/
   fi
 
   # Note about RTL config file
@@ -336,7 +352,7 @@ WantedBy=multi-user.target
   # run config as root to connect prepare services (lit, pool, ...)
   sudo /home/admin/config.scripts/bonus.rtl.sh connect-services
 
-  # ig
+  # setting value in raspi blitz config
   /home/admin/config.scripts/blitz.conf.sh set ${configEntry} "on"
 
   sudo systemctl enable ${systemdService}
@@ -474,21 +490,28 @@ if [ "$1" = "prestart" ]; then
   # Core Lightning changes of config
   # https://github.com/Ride-The-Lightning/RTL/blob/master/docs/C-Lightning-setup.md
   if [ "${LNTYPE}" == "cl" ]; then
-    echo "# CL Config"
+    echo "# CLN config"
+    if [ ! -f /mnt/hdd/app-data/rtl/${systemdService}/rune_for_${systemdService} ]; then
+      # Create/reuse core-lightning's rune. Check createrune and showrunes documentation for more details on how to create runes
+      newRune=$(/usr/local/bin/lightning-cli --conf=${CLCONF} createrune | jq .rune)
+      # Copy the rune and save it in a file which must be accessible to RTL. The content of the file must be LIGHTNING_RUNE="<your-rune>"
+      echo "LIGHTNING_RUNE=${newRune}" >/mnt/hdd/app-data/rtl/${systemdService}/rune_for_${systemdService}
+    fi
     cat /mnt/hdd/app-data/rtl/${systemdService}/RTL-Config.json |
       jq ".port = \"${RTLHTTP}\"" |
       jq ".multiPass = \"${RPCPASSWORD}\"" |
       jq ".multiPassHashed = \"\"" |
       jq ".nodes[0].lnNode = \"${hostname}\"" |
-      jq ".nodes[0].lnImplementation = \"CLT\"" |
-      jq ".nodes[0].Authentication.macaroonPath = \"/home/bitcoin/c-lightning-REST/${CLNETWORK}/certs\"" |
+      jq ".nodes[0].lnImplementation = \"CLN\"" |
+      jq ".nodes[0].Authentication.runePath = \"/mnt/hdd/app-data/rtl/${systemdService}/rune_for_${systemdService}\"" |
       jq ".nodes[0].Authentication.configPath = \"${CLCONF}\"" |
       jq ".nodes[0].Authentication.swapMacaroonPath = \"/home/rtl/.loop/${CHAIN}/\"" |
       jq ".nodes[0].Authentication.boltzMacaroonPath = \"/home/rtl/.boltz-lnd/macaroons/\"" |
       jq ".nodes[0].Settings.userPersona = \"OPERATOR\"" |
-      jq ".nodes[0].Settings.lnServerUrl = \"https://127.0.0.1:${portprefix}6100\"" |
+      jq ".nodes[0].Settings.lnServerUrl = \"https://127.0.0.1:${portprefix}7378\"" |
       jq ".nodes[0].Settings.channelBackupPath = \"/mnt/hdd/app-data/rtl/${systemdService}-SCB-backup-$hostname\"" |
       jq ".nodes[0].Settings.swapServerUrl = \"https://127.0.0.1:${SWAPSERVERPORT}\"" >/mnt/hdd/app-data/rtl/${systemdService}/RTL-Config.json.tmp
+
     mv /mnt/hdd/app-data/rtl/${systemdService}/RTL-Config.json.tmp /mnt/hdd/app-data/rtl/${systemdService}/RTL-Config.json
   fi
 
@@ -552,6 +575,16 @@ if [ "$1" = "0" ] || [ "$1" = "off" ]; then
     fi
     echo "# Delete all configs"
     sudo rm -rf /mnt/hdd/app-data/rtl
+    echo "# Disable and stop all RTL services"
+    # Get all systemd services containing "RTL"
+    services=$(systemctl list-units --type=service --all | grep RTL | awk '{print $1}')
+    # Stop and remove each service
+    for service in $services; do
+      echo "Stopping service: $service"
+      sudo systemctl disable --now "$service"
+      sudo rm /etc/systemd/system/${service}.service
+    done
+    echo "# All RTL services have been stopped and removed."
   fi
 
   # close ports on firewall
@@ -574,16 +607,16 @@ if [ "$1" = "update" ]; then
     # unset $1
     set --
     UPSTREAM=${1:-'@{u}'}
-    LOCAL=$(git rev-parse @)
-    REMOTE=$(git rev-parse "$UPSTREAM")
+    LOCAL=$(sudo -u rtl git rev-parse @)
+    REMOTE=$(sudo -u rtl git rev-parse "$UPSTREAM")
     if [ $LOCAL = $REMOTE ]; then
-      TAG=$(git tag | sort -V | grep -v rc | tail -1)
+      TAG=$(sudo -u rtl git tag | sort -V | grep -v rc | tail -1)
       echo "# You are up-to-date on version" $TAG
     else
       echo "# Pulling latest changes..."
       sudo -u rtl git pull -p
       echo "# Reset to the latest release tag"
-      TAG=$(git tag | sort -V | grep -v rc | tail -1)
+      TAG=$(sudo -u rtl git tag | sort -V | grep -v rc | tail -1)
       sudo -u rtl git reset --hard $TAG
       echo "# updating to the latest"
       # https://github.com/Ride-The-Lightning/RTL#or-update-existing-dependencies

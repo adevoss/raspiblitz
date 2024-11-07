@@ -19,7 +19,6 @@ if [ ${#jam} -eq 0 ]; then jam="off"; fi
 if [ ${#LNBits} -eq 0 ]; then LNBits="off"; fi
 if [ ${#mempoolExplorer} -eq 0 ]; then mempoolExplorer="off"; fi
 if [ ${#bos} -eq 0 ]; then bos="off"; fi
-if [ ${#lnproxy} -eq 0 ]; then lnproxy="off"; fi
 if [ ${#pyblock} -eq 0 ]; then pyblock="off"; fi
 if [ ${#thunderhub} -eq 0 ]; then thunderhub="off"; fi
 if [ ${#sphinxrelay} -eq 0 ]; then sphinxrelay="off"; fi
@@ -27,16 +26,12 @@ if [ ${#lit} -eq 0 ]; then lit="off"; fi
 if [ ${#lndg} -eq 0 ]; then lndg="off"; fi
 if [ ${#whitepaper} -eq 0 ]; then whitepaper="off"; fi
 if [ ${#chantools} -eq 0 ]; then chantools="off"; fi
-if [ ${#homer} -eq 0 ]; then homer="off"; fi
-if [ ${#sparko} -eq 0 ]; then sparko="off"; fi
-if [ ${#spark} -eq 0 ]; then spark="off"; fi
-if [ ${#tallycoinConnect} -eq 0 ]; then tallycoinConnect="off"; fi
 if [ ${#helipad} -eq 0 ]; then helipad="off"; fi
-if [ ${#bitcoinminds} -eq 0 ]; then bitcoinminds="off"; fi
-if [ ${#squeaknode} -eq 0 ]; then squeaknode="off"; fi
-if [ ${#itchysats} -eq 0 ]; then itchysats="off"; fi
 if [ ${#lightningtipbot} -eq 0 ]; then lightningtipbot="off"; fi
 if [ ${#fints} -eq 0 ]; then fints="off"; fi
+if [ ${#lndk} -eq 0 ]; then lndk="off"; fi
+if [ ${#labelbase} -eq 0 ]; then labelbase="off"; fi
+if [ ${#publicpool} -eq 0 ]; then publicpool="off"; fi
 
 # show select dialog
 echo "run dialog ..."
@@ -53,8 +48,8 @@ if [ "${network}" == "bitcoin" ]; then
   OPTIONS+=(ja 'BTC JoinMarket+JoininBox menu' ${joinmarket})
   OPTIONS+=(za 'BTC Jam (JoinMarket WebUI)' ${jam})
   OPTIONS+=(wa 'BTC Download Bitcoin Whitepaper' ${whitepaper})
-  OPTIONS+=(va 'BTC Install BitcoinMinds.org' ${bitcoinminds})
-  OPTIONS+=(ua 'BTC Install ItchySats' ${itchysats})
+  OPTIONS+=(ls 'BTC Labelbase' ${labelbase})
+  OPTIONS+=(pp 'BTC Publicpool (Solo Mining)' ${publicpool})  
 fi
 
 # available for both LND & c-lightning
@@ -70,23 +65,17 @@ if [ "${lightning}" == "lnd" ] || [ "${lnd}" == "on" ]; then
   OPTIONS+=(la 'LND LIT (loop, pool, faraday)' ${lit})
   OPTIONS+=(gb 'LND LNDg (auto-rebalance, auto-fees)' ${lndg})
   OPTIONS+=(oa 'LND Balance of Satoshis' ${bos})
-  OPTIONS+=(lp 'LND lnproxy server' ${lnproxy})
   OPTIONS+=(ya 'LND PyBLOCK' ${pyblock})
   OPTIONS+=(ha 'LND ChannelTools (Fund Rescue)' ${chantools})
-  OPTIONS+=(xa 'LND Sphinx-Relay' ${sphinxrelay})
   OPTIONS+=(fa 'LND Helipad Boostagram reader' ${helipad})
-  OPTIONS+=(da 'LND Tallycoin Connect' ${tallycoinConnect})
-  #OPTIONS+=(qa 'LND Squeaknode' ${squeaknode})
+  OPTIONS+=(lb 'LND LNDK (experimental BOLT 12)' ${lndk})
 fi
 
 # just available for CL
 if [ "${lightning}" == "cl" ] || [ "${cl}" == "on" ]; then
   OPTIONS+=(ca 'Core Lightning RTL Webinterface' ${crtlWebinterface})
-  OPTIONS+=(ka 'Core Lightning Sparko WebWallet' ${sparko})
-  OPTIONS+=(na 'Core Lightning Spark Wallet' ${spark})
 fi
 
-OPTIONS+=(ma 'Homer Dashboard' ${homer})
 OPTIONS+=(fn 'FinTS/HBCI Interface (experimental)' ${fints})
 
 CHOICES=$(dialog --title ' Additional Mainnet Services ' \
@@ -146,7 +135,7 @@ if [ "${crtlWebinterface}" != "${choice}" ]; then
   errorOnInstall=$?
   if [ "${choice}" =  "on" ]; then
     if [ ${errorOnInstall} -eq 0 ]; then
-      sudo systemctl start RTL
+      sudo systemctl start cRTL
       echo "waiting 10 secs .."
       sleep 10
       /home/admin/config.scripts/bonus.rtl.sh menu cl mainnet
@@ -267,6 +256,17 @@ choice="off"; check=$(echo "${CHOICES}" | grep -c "pa")
 if [ ${check} -eq 1 ]; then choice="on"; fi
 if [ "${BTCPayServer}" != "${choice}" ]; then
   echo "BTCPayServer setting changed .."
+
+  #4049 warn if system has less than 8GB RAM
+  ramGB=$(free -g | awk '/^Mem:/{print $2}')
+  if [ "${choice}" =  "on" ] && [ ${ramGB} -lt 7 ]; then
+    whiptail --title "Your RaspiBlitz has less than the recommended 8GB of RAM to run BTCPayServer.\nDo you really want to proceed?" 10 50 --defaultno --yes-button "Continue" --no-button "Cancel"
+    if [ $? -eq 1 ]; then
+      # if user choosed CANCEL just null the choice
+      choice=""
+    fi
+  fi
+
   # check if TOR is installed
   source /mnt/hdd/raspiblitz.conf
   if [ "${choice}" =  "on" ] && [ "${runBehindTor}" = "off" ]; then
@@ -341,21 +341,6 @@ if [ "${bos}" != "${choice}" ]; then
   fi
 else
   echo "Balance of Satoshis setting unchanged."
-fi
-
-# lnproxy process choice
-choice="off"; check=$(echo "${CHOICES}" | grep -c "lp")
-if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${lnproxy}" != "${choice}" ]; then
-  echo "lnproxy setting changed .."
-  anychange=1
-  sudo -u admin /home/admin/config.scripts/bonus.lnproxy.sh ${choice}
-  source /mnt/hdd/raspiblitz.conf
-  if [ "${lnproxy}" =  "on" ]; then
-    sudo -u admin /home/admin/config.scripts/bonus.lnproxy.sh menu
-  fi
-else
-  echo "lnproxy setting unchanged."
 fi
 
 # PyBLOCK process choice
@@ -478,25 +463,6 @@ else
   echo "LNDg unchanged."
 fi
 
-# Sphinx Relay
-choice="off"; check=$(echo "${CHOICES}" | grep -c "xa")
-if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${sphinxrelay}" != "${choice}" ]; then
-  echo "Sphinx-Relay Setting changed .."
-  anychange=1
-  sudo -u admin /home/admin/config.scripts/bonus.sphinxrelay.sh ${choice}
-  if [ "${choice}" =  "on" ]; then
-    echo "Giving service 1 minute to start up ... (please wait) ..."
-    sleep 60
-    whiptail --title " Installed Sphinx Server" --msgbox "\
-Sphinx Server was installed.\n
-Use the new 'SPHINX' entry in Main Menu for more info.\n
-" 10 35
-  fi
-else
-  echo "Sphinx Relay unchanged."
-fi
-
 # Helipad
 choice="off"; check=$(echo "${CHOICES}" | grep -c "fa")
 if [ ${check} -eq 1 ]; then choice="on"; fi
@@ -512,21 +478,20 @@ else
   echo "Helipad setting unchanged."
 fi
 
-# Tallycoin
-choice="off"; check=$(echo "${CHOICES}" | grep -c "da")
+# LNDK
+choice="off"; check=$(echo "${CHOICES}" | grep -c "lb")
 if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${tallycoinConnect}" != "${choice}" ]; then
-  echo "Tallycoin Setting changed .."
+if [ "${lndk}" != "${choice}" ]; then
+  echo "LNDK Setting changed .."
   anychange=1
-  sudo -u admin /home/admin/config.scripts/bonus.tallycoin-connect.sh ${choice}
+  sudo -u admin /home/admin/config.scripts/bonus.lndk.sh ${choice}
   if [ "${choice}" =  "on" ]; then
-    whiptail --title " Installed Tallycoin-Connect" --msgbox "\
-Tallycoin-Connect was installed.\n
-Use the new 'TALLY' entry in Main Menu for more info.\n
+    whiptail --title " Installed LNDK" --msgbox "\
+LNDK was installed.\n
 " 10 45
   fi
 else
-  echo "Tallycoin Setting unchanged."
+  echo "LNDK Setting unchanged."
 fi
 
 # JoinMarket process choice
@@ -629,112 +594,36 @@ else
   echo "Whitepaper setting unchanged."
 fi
 
-# Homer process choice
-choice="off"; check=$(echo "${CHOICES}" | grep -c "ma")
+# labelbase process choice
+choice="off"; check=$(echo "${CHOICES}" | grep -c "ls")
 if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${homer}" != "${choice}" ]; then
-  echo "Homer settings changed .."
+if [ "${labelbase}" != "${choice}" ]; then
+  echo "Labelbase setting changed .."
   anychange=1
-  /home/admin/config.scripts/bonus.homer.sh ${choice}
-  errorOnInstall=$?
-  if [ "${choice}" =  "on" ]; then
-    whiptail --title " Installed Homer" --msgbox "\
-Homer was installed.\n
-Use the new 'Homer' entry in Main Menu for more info.\n
-" 10 35
-  fi
-else
-  echo "Homer Setting unchanged."
-fi
-
-# BitcoinMinds process choice
-choice="off"; check=$(echo "${CHOICES}" | grep -c "va")
-if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${bitcoinminds}" != "${choice}" ]; then
-  echo "BitcoinMinds setting changed."
-  anychange=1
-  sudo -u admin /home/admin/config.scripts/bonus.bitcoinminds.sh ${choice}
+  sudo -u admin /home/admin/config.scripts/bonus.labelbase.sh ${choice}
   source /mnt/hdd/raspiblitz.conf
-  if [ "${bitcoinminds}" =  "on" ]; then
-    sudo -u admin /home/admin/config.scripts/bonus.bitcoinminds.sh menu
+  if [ "${labelbase}" =  "on" ]; then
+    sudo -u admin /home/admin/config.scripts/bonus.labelbase.sh menu
   fi
 else
-  echo "BitcoinMinds setting unchanged."
+  echo "Labelbase setting unchanged."
 fi
 
-# sparko process choice
-choice="off"; check=$(echo "${CHOICES}" | grep -c "ka")
+# publicpool process choice
+choice="off"; check=$(echo "${CHOICES}" | grep -c "pp")
 if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${sparko}" != "${choice}" ]; then
-  echo "# Sparko on mainnet Setting changed .."
+if [ "${publicpool}" != "${choice}" ]; then
+  echo "Publicpool setting changed .."
   anychange=1
-  /home/admin/config.scripts/cl-plugin.sparko.sh ${choice} mainnet
-  errorOnInstall=$?
-  if [ "${choice}" =  "on" ]; then
-    if [ ${errorOnInstall} -eq 0 ]; then
-      /home/admin/config.scripts/cl-plugin.sparko.sh menu mainnet
-    else
-      l1="# FAIL on Sparko on mainnet install #"
-      l2="# Try manual install on terminal after reboot with:"
-      l3="/home/admin/config.scripts/cl-plugin.sparko.sh on mainnet"
-      dialog --title 'FAIL' --msgbox "${l1}\n${l2}\n${l3}" 7 65
-    fi
+  sudo -u admin /home/admin/config.scripts/bonus.publicpool.sh ${choice}
+  source /mnt/hdd/raspiblitz.conf
+  if [ "${publicpool}" =  "on" ]; then
+    sudo -u admin /home/admin/config.scripts/bonus.publicpool.sh menu
   fi
 else
-  echo "# Sparko on mainnet Setting unchanged."
+  echo "Publicpool setting unchanged."
 fi
 
-# spark wallet process choice
-choice="off"; check=$(echo "${CHOICES}" | grep -c "na")
-if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${spark}" != "${choice}" ]; then
-  echo "# Spark Wallet on mainnet Setting changed .."
-  anychange=1
-  /home/admin/config.scripts/cl.spark.sh ${choice} mainnet
-  errorOnInstall=$?
-  if [ "${choice}" =  "on" ]; then
-    if [ ${errorOnInstall} -eq 0 ]; then
-      /home/admin/config.scripts/cl.spark.sh menu mainnet
-    else
-      l1="# FAIL on Spark Wallet on mainnet install #"
-      l2="# Try manual install on terminal after reboot with:"
-      l3="/home/admin/config.scripts/cl.spark.sh on mainnet"
-      dialog --title 'FAIL' --msgbox "${l1}\n${l2}\n${l3}" 7 65
-    fi
-  fi
-else
-  echo "# Spark Wallet on mainnet Setting unchanged."
-fi
-
-# squeaknode process choice
-choice="off"; check=$(echo "${CHOICES}" | grep -c "qa")
-if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${squeaknode}" != "${choice}" ]; then
-  echo "squeaknode Setting changed .."
-  anychange=1
-  sudo -u admin /home/admin/config.scripts/bonus.squeaknode.sh ${choice}
-  if [ "${choice}" =  "on" ]; then
-    sudo systemctl start squeaknode
-    sudo -u admin /home/admin/config.scripts/bonus.squeaknode.sh menu
-  fi
-else
-  echo "squeaknode setting unchanged."
-fi
-
-# ItchySats process choice
-choice="off"; check=$(echo "${CHOICES}" | grep -c "ua")
-if [ ${check} -eq 1 ]; then choice="on"; fi
-if [ "${itchysats}" != "${choice}" ]; then
-  echo "ItchySats setting changed .."
-  anychange=1
-  sudo -u admin /home/admin/config.scripts/bonus.itchysats.sh ${choice} --download
-  if [ "${choice}" =  "on" ]; then
-    sudo systemctl start itchysats
-    sudo -u admin /home/admin/config.scripts/bonus.itchysats.sh menu
-  fi
-else
-  echo "ItchySats setting unchanged."
-fi
 
 # fints process choice  
 choice="off"; check=$(echo "${CHOICES}" | grep -c "fn")

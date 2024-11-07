@@ -48,12 +48,16 @@ if [ "$1" == "redact" ]; then
   sed -i 's/usr=[a-zA-Z0-9]\+/usr=***/' ${redactFile}
   sed -i 's/user [a-zA-Z0-9]\+/user ***/' ${redactFile}
 
+  # redact i2p #4507
+  sed -i 's/[[:alnum:]]*.b32.i2p/***.b32.i2p/' ${redactFile}
+
   exit 0
 fi
 
 
 # load code software version
 source /home/admin/_version.info
+codeCommit=$(git -C /home/admin/raspiblitz rev-parse --short HEAD)
 
 ## get basic info (its OK if not set yet)
 source /home/admin/raspiblitz.info 2>/dev/null
@@ -81,8 +85,15 @@ echo "***************************************************************"
 echo "* RASPIBLITZ DEBUG LOGS "
 echo "***************************************************************"
 echo "blitzversion: ${codeVersion}"
+echo "commit-release: ${codeRelease}"
+echo "commit-active: ${codeCommit}"
 echo "chainnetwork: ${network} / ${chain}"
 uptime
+echo
+
+echo "*** FAILED SERVICES ***"
+echo "list any servcies with problems: sudo systemctl list-units --failed"
+sudo systemctl list-units --failed
 echo
 
 echo "*** SETUPPHASE / BOOTSTRAP ***"
@@ -303,6 +314,8 @@ if [ "${ElectRS}" == "on" ]; then
   echo
   echo "*** ElectRS Status ***"
   sudo /home/admin/config.scripts/bonus.electrs.sh status
+  echo "*** ElectRS Status-Sync ***"
+  sudo /home/admin/config.scripts/bonus.electrs.sh status-sync
   echo
 else
   echo "- Electrum Rust Server is OFF by config"
@@ -422,6 +435,15 @@ else
   echo "- FINTS is OFF by config"
 fi
 
+if [ "${publicpool}" == "on" ]; then  
+  echo
+  echo "*** LAST 20 PUBLIPOOL LOGS ***"
+  echo "sudo journalctl -u publicpool -b --no-pager -n20"
+  sudo journalctl -u publicpool -b --no-pager -n20
+else
+  echo "- PUBLICPOOL is OFF by config"
+fi
+
 echo
 echo "*** MOUNTED DRIVES ***"
 echo "df -T -h"
@@ -439,14 +461,22 @@ sudo du -sh /var/log
 
 echo
 echo "*** DATADRIVE ***"
+source <(sudo /home/admin/config.scripts/blitz.datadrive.sh status)
 sudo /home/admin/config.scripts/blitz.datadrive.sh status
+sudo smartctl -a /dev/${datadisk}
 echo
 
 echo "*** NETWORK ***"
 sudo /home/admin/config.scripts/internet.sh status | grep 'network_device\|localip\|dhcp'
 echo
 
+echo
+echo "*** ZRAM ***"
+sudo /home/admin/config.scripts/blitz.zram.sh status
+echo
+
 echo "*** HARDWARE TEST RESULTS ***"
+sudo vcgencmd get_throttled 2>/dev/null
 source <(/home/admin/_cache.sh get system_count_undervoltage)
 showImproveInfo=0
 if [ ${#system_count_undervoltage} -gt 0 ]; then
@@ -461,6 +491,10 @@ echo "*** SYSTEM CACHE STATUS ***"
 /home/admin/_cache.sh "export" system_
 /home/admin/_cache.sh "export" ln_default | grep -v "ln_default_address"
 /home/admin/_cache.sh "export" btc_default | grep -v "btc_default_address"
+
+echo "*** POSSIBLE ERROR REPORTS ***"
+ls -1  /home/admin/error* 2>/dev/null
+echo
 
 echo
 echo "*** OPTION: SHARE THIS DEBUG OUTPUT ***"

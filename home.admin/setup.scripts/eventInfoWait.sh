@@ -6,7 +6,7 @@
 source /home/admin/raspiblitz.info 2>/dev/null
 
 # get values from cache
-source <(/home/admin/_cache.sh get codeVersion internet_localip blitzapi)
+source <(/home/admin/_cache.sh get codeVersion codeRelease internet_localip blitzapi hdd_used_info system_temp_celsius)
 
 # 1st PARAMETER: eventID
 # fixed ID string for a certain event
@@ -33,8 +33,14 @@ if [ "${mode}" != "lcd" ] && [ "${mode}" != "ssh" ]; then
     exit 1
 fi
 
+if [ "${vm}" == "1" ]; then
+    temp_info="VM"
+else
+    temp_info="${system_temp_celsius}°C"
+fi
+
 # default backtitle for dialog
-backtitle="RaspiBlitz ${codeVersion} / ${eventID} / ${internet_localip}"
+backtitle="${codeVersion}-${codeRelease} ${eventID} ${internet_localip} ${temp_info} ${hdd_used_info}"
 
 ################################################
 # 1) WELL DEFINED EVENTS
@@ -47,7 +53,7 @@ Starting RaspiBlitz
 Please wait ...
 " 6 24
 
-elif [ "${eventID}" == "ready" ]; then
+elif [ "${eventID}" == "ready" ] || [ "${eventID}" == "nostate" ]; then
 
     dialog --backtitle "${backtitle}" --cr-wrap --infobox "
 Please wait ...
@@ -147,12 +153,6 @@ ssh admin@${internet_localip}
 Use your Password A
 " 7 41
 
-elif [ "${eventID}" == "copystation" ] && [ "${mode}" == "lcd" ]; then
-
-    dialog --backtitle "${backtitle}" --title " Copy-Station Mode " --cr-wrap --infobox "
-${contentString}" 7 41
-
-
 elif [ "${eventID}" == "walletlocked" ] && [ "${mode}" == "lcd" ]; then
 
     dialog --backtitle "${backtitle}" --cr-wrap --infobox "
@@ -186,7 +186,7 @@ elif [ "${eventID}" == "waitsetup" ] && [ "${mode}" == "lcd" ]; then
         source <(/home/admin/_cache.sh get system_ram_gb hddGigaBytes hddBlocksBitcoin hddBlocksLitecoin setupPhase)
 
         # custom backtitle for this dialog
-        backtitle="RaspiBlitz ${codeVersion}"
+        backtitle="RaspiBlitz ${codeVersion}-${codeRelease}"
 
         # display if RAM size
         backtitle="${backtitle} / ${system_ram_gb}GB RAM"
@@ -216,6 +216,7 @@ elif [ "${eventID}" == "waitsetup" ] && [ "${mode}" == "lcd" ]; then
         fi
 
         # show default login help info
+        logger -p info "eventInfoWait.sh: waitsetup dialog"
         dialog --backtitle "${backtitle}" --cr-wrap --infobox "
 ${welcomeline}
 ------------------------------------
@@ -318,6 +319,15 @@ elif [ "${eventID}" == "errorHDD" ]; then
 PROBLEM: FAILED HDD/SSD
 Detailed Error Message:
 ${contentString}
+" 7 35
+
+elif [ "${eventID}" == "errorWIFI" ]; then
+
+    # contentString --> detail error message
+    dialog --backtitle "${backtitle}" --cr-wrap --infobox "PROBLEM: Failed WIFI config
+${contentString}
+edit or remove file 'wifi'
+Shutting down ...
 " 7 35
 
 elif [ "${eventID}" == "errorNetwork" ]; then

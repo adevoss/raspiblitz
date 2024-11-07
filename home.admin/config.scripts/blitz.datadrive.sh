@@ -26,17 +26,15 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# install BTRFS if needed
-btrfsInstalled=$(btrfs --version 2>/dev/null | grep -c "btrfs-progs")
-if [ ${btrfsInstalled} -eq 0 ]; then
-  >&2 echo "# Installing BTRFS ..."
-  apt-get install -y btrfs-progs 1>/dev/null
+# determine correct raspberrypi boot drive path (that easy to access when sd card is insert into laptop)
+raspi_bootdir=""
+if [ -d /boot/firmware ]; then
+  raspi_bootdir="/boot/firmware"
+elif [ -d /boot ]; then
+  raspi_bootdir="/boot"
 fi
-btrfsInstalled=$(btrfs --version 2>/dev/null | grep -c "btrfs-progs")
-if [ ${btrfsInstalled} -eq 0 ]; then
-  echo "error='missing btrfs package'"
-  exit 1
-fi
+echo "# raspi_bootdir(${raspi_bootdir})"
+
 
 # install smartmontools if needed
 smartmontoolsInstalled=$(apt-cache policy smartmontools | grep -c 'Installed: (none)' | grep -c "0")
@@ -57,13 +55,40 @@ fi
 # gathering system info
 # is global so that also other parts of this script can use this
 
+# check if a btrfs filesystem is available
 # basics
 isMounted=$(df | grep -c /mnt/hdd)
-isBTRFS=$(btrfs filesystem show 2>/dev/null| grep -c 'BLITZSTORAGE')
-isRaid=$(btrfs filesystem df /mnt/hdd 2>/dev/null | grep -c "Data, RAID1")
-isZFS=$(zfs list 2>/dev/null | grep -c "/mnt/hdd")
+isBTRFS="0"
+isRaid="0"
+isZFS="0"
 isSSD="0"
 isSMART="0"
+
+# BTRFS extras
+btrfsConnected=$(lsblk -f | grep -c btrfs)
+if [ ${btrfsConnected} -gt 0 ]; then
+
+  # install BTRFS if needed
+  btrfsInstalled=$(btrfs --version 2>/dev/null | grep -c "btrfs-progs")
+  if [ ${btrfsInstalled} -eq 0 ]; then
+    >&2 echo "# Installing BTRFS ..."
+    apt-get install -y btrfs-progs 1>/dev/null
+  fi
+  btrfsInstalled=$(btrfs --version 2>/dev/null | grep -c "btrfs-progs")
+  if [ ${btrfsInstalled} -eq 0 ]; then
+    echo "error='missing btrfs package'"
+    exit 1
+  fi
+  isBTRFS=$(btrfs filesystem show 2>/dev/null| grep -c 'BLITZSTORAGE')
+  isRaid=$(btrfs filesystem df /mnt/hdd 2>/dev/null | grep -c "Data, RAID1")
+
+fi
+
+# ZFS extras
+zfsConnected=$(lsblk -f | grep -c zfs)
+if [ ${zfsConnected} -gt 0 ]; then
+  isZFS=$(zfs list 2>/dev/null | grep -c "/mnt/hdd")
+fi
 
 # determine if swap is external on or not
 externalSwapPath="/mnt/hdd/swapfile"
@@ -109,10 +134,10 @@ if [ "$1" = "status" ]; then
       testname=$(echo $line | cut -d " " -f 1 | sed 's/[^a-z0-9]*//g')
       if [ $(echo $line | grep -c "nvme") = 0 ]; then
         testdevice=$(echo $testname | sed 's/[^a-z]*//g')
-	  testpartition=$(echo $testname | grep -P '[a-z]{3,5}[0-9]{1}')
+	      testpartition=$(echo $testname | grep -P '[a-z]{3,5}[0-9]{1}')
       else
-	testdevice=$(echo $testname | sed 's/\([^p]*\).*/\1/')
-	testpartition=$(echo $testname | grep -P '[p]{1}')
+	      testdevice=$(echo $testname | sed 's/\([^p]*\).*/\1/')
+	      testpartition=$(echo $testname | grep -P '[p]{1}')
       fi
 	  
       if [ ${#testpartition} -gt 0 ]; then
@@ -121,8 +146,8 @@ if [ "$1" = "status" ]; then
         testsize=0
       fi
 
-      #echo "# line($line)"
-      #echo "# testname(${testname}) testdevice(${testdevice}) testpartition(${testpartition}) testsize(${testsize})"
+      # echo "# line($line)"
+      # echo "# testname(${testname}) testdevice(${testdevice}) testpartition(${testpartition}) testsize(${testsize})"
 
       # count partitions
       testpartitioncount=0
@@ -132,36 +157,37 @@ if [ "$1" = "status" ]; then
         testpartitioncount=$((testpartitioncount-1))
       fi
 
-      #echo "# testpartitioncount($testpartitioncount)"
-      #echo "# testpartitioncount(${testpartitioncount})"
-      #echo "# OSPartition(${OSPartition})"
-      #echo "# bootPartition(${bootPartition})"
-      #echo "# hdd(${hdd})"
-
       if [ "$(uname -m)" = "x86_64" ]; then
-	if [ $(echo "$testpartition" | grep -c "nvme")  = 0 ]; then
+	      
+        # For PC systems
+
+        if [ $(echo "$testpartition" | grep -c "nvme")  = 0 ]; then
           testParentDisk=$(echo "$testpartition" | sed 's/[^a-z]*//g')
-	else
+	      else
           testParentDisk=$(echo "$testpartition" | sed 's/\([^p]*\).*/\1/')
-   	fi
-	if [ $(echo "$OSPartition" | grep -c "nvme")  = 0 ]; then
+   	    fi
+	      
+        if [ $(echo "$OSPartition" | grep -c "nvme")  = 0 ]; then
           OSParentDisk=$(echo "$OSPartition" | sed 's/[^a-z]*//g')
-	else
+	      else
           OSParentDisk=$(echo "$OSPartition" | sed 's/\([^p]*\).*/\1/')
         fi
+        
         if [ $(echo "$bootPartition" | grep -c "nvme")  = 0 ]; then	
           bootParentDisk=$(echo "$bootPartition" | sed 's/[^a-z]*//g')
-	else
-	  bootParentDisk=$(echo "$bootPartition" | sed 's/\([^p]*\).*/\1/')
-	fi
+	      else
+	        bootParentDisk=$(echo "$bootPartition" | sed 's/\([^p]*\).*/\1/')
+	      fi
 		  
         if [ "$testdevice" != "$OSParentDisk" ] && [ "$testdevice" != "$bootParentDisk" ];then
           sizeDataPartition=${testsize}
           hddDataPartition="${testpartition}"
           hdd="${testdevice}"
         fi
+
       elif [ $testpartitioncount -gt 0 ]; then
         # if a partition was found - make sure to skip the OS and boot partitions
+        # echo "# testpartitioncount > 0"
         if [ "${testpartition}" != "${OSPartition}" ] && [ "${testpartition}" != "${bootPartition}" ]; then
           # make sure to use the biggest
           if [ ${testsize} -gt ${sizeDataPartition} ]; then
@@ -170,19 +196,34 @@ if [ "$1" = "status" ]; then
             hdd="${testdevice}"
           fi
         fi
+
       else
         # default hdd set, when there is no OSpartition and there might be no partitions at all
-        if [ "${OSPartition}" = "root" ] && [ "${hdd}" = "" ] && [ "${testdevice}" != "" ]; then
+        # echo "# else"
+        # echo "# testsize(${testsize})"
+        # echo "# sizeDataPartition(${sizeDataPartition})"
+
+        if [ "${OSPartition}" = "mmcblk0p2" ] && [ "${hdd}" = "" ] && [ "${testdevice}" != "" ]; then
+          # echo "# OSPartition = mmcblk0p2"
           hdd="${testdevice}"
         fi
-	# make sure to use the biggest
+
+	      # make sure to use the biggest
         if [ ${testsize} -gt ${sizeDataPartition} ]; then
-	  # Partition to be created is smaller than disk so this is not correct (but close)
+	        # Partition to be created is smaller than disk so this is not correct (but close)
+          # echo "# testsize > sizeDataPartition"
           sizeDataPartition=$(fdisk -l /dev/$testdevice | grep GiB | cut -d " " -f 5)
           hddDataPartition="${testdevice}1"
           hdd="${testdevice}"
-	fi
+	      fi
+
       fi
+
+      # echo "# testpartitioncount($testpartitioncount)"
+      # echo "# OSPartition(${OSPartition})"
+      # echo "# bootPartition(${bootPartition})"
+      # echo "# hdd(${hdd})"
+
     done < .lsblk.tmp
     rm -f .lsblk.tmp 1>/dev/null 2>/dev/null
 
@@ -193,32 +234,41 @@ if [ "$1" = "status" ]; then
     fi
 
     # try to detect if its an SSD
-    isSMART=$(sudo smartctl -a /dev/${hdd} | grep -c "Rotation Rate:")
+    isSMART=$(smartctl -a /dev/${hdd} | grep -c "Serial Number:")
     echo "isSMART=${isSMART}"
-    if [ ${isSMART} -gt 0 ]; then
-      #detect using smartmontools (preferred)
-      isSSD=$(sudo smartctl -a /dev/${hdd} | grep 'Rotation Rate:' | grep -c "Solid State")
-    else
-      #detect using using fall back method
-      isSSD=$(cat /sys/block/${hdd}/queue/rotational 2>/dev/null | grep -c 0)
-    fi 
+    isSSD=1
+    isRotational=$(echo "${smartCtlA}" | grep -c "Rotation Rate:")
+    if [ ${isRotational} -gt 0 ]; then
+      isSSD=$(echo "${smartCtlA}" | grep "Rotation Rate:" | grep -c "Solid State Device")
+    fi
     echo "isSSD=${isSSD}"
+    hddTemp=""
+    echo "hddTemperature="
+    echo "hddTemperatureStr='?°C'"
 
-    # display results from hdd & partition detection
-    echo "hddCandidate='${hdd}'"
     hddBytes=0
     hddGigaBytes=0
     if [ "${hdd}" != "" ]; then
       hddBytes=$(fdisk -l /dev/$hdd | grep GiB | cut -d " " -f 5)
       if [ "${hddBytes}" = "" ]; then
-	hddBytes=$(fdisk -l /dev/$hdd | grep TiB | cut -d " " -f 5)
+	      hddBytes=$(fdisk -l /dev/$hdd | grep TiB | cut -d " " -f 5)
       fi
       hddGigaBytes=$(echo "scale=0; ${hddBytes}/1024/1024/1024" | bc -l)
     fi
+
+    # check if big enough
+    if [ ${hddGigaBytes} -lt 130 ]; then
+      echo "# Found HDD '${hdd}' is smaller than 130GB"
+      hdd=""
+      hddDataPartition=""
+    fi
+
+    # display results from hdd & partition detection
+    echo "hddCandidate='${hdd}'"
     echo "hddBytes=${hddBytes}"
     echo "hddGigaBytes=${hddGigaBytes}"
     echo "hddPartitionCandidate='${hddDataPartition}'"
-    
+
     # if positive deliver more data
     if [ ${#hddDataPartition} -gt 0 ]; then
       # check partition size in bytes and GBs
@@ -277,7 +327,7 @@ if [ "$1" = "status" ]; then
             cp -a /mnt/hdd${subVolumeDir}/raspiblitz.conf /var/cache/raspiblitz/hdd-inspect/raspiblitz.conf
 
             # make copy of WIFI config to RAMDISK (if available)
-            cp -a /mnt/hdd${subVolumeDir}/app-data/wpa_supplicant.conf /var/cache/raspiblitz/hdd-inspect/wpa_supplicant.conf 2>/dev/null
+            cp -a /mnt/hdd${subVolumeDir}/app-data/wifi /var/cache/raspiblitz/hdd-inspect/ 2>/dev/null
 
             # Convert old ssh backup data structure (if needed)
             oldDataExists=$(sudo ls /mnt/hdd${subVolumeDir}/ssh/ssh_host_rsa_key 2>/dev/null | grep -c "ssh_host_rsa_key")
@@ -432,15 +482,16 @@ if [ "$1" = "status" ]; then
     fi
     echo "hddRaspiVersion='${hddRaspiVersion}'"
 
+    smartCtlA=$(smartctl -a /dev/${hdd} | tr -d '"')
+
     # try to detect if its an SSD
-    isSMART=$(sudo smartctl -a /dev/${hdd} | grep -c "Rotation Rate:")
+    isSMART=$(echo "${smartCtlA}" | grep -c "Serial Number:")
     echo "isSMART=${isSMART}"
-    if [ ${isSMART} -gt 0 ]; then
-      #detect using smartmontools (preferred)
-      isSSD=$(sudo smartctl -a /dev/${hdd} | grep 'Rotation Rate:' | grep -c "Solid State")
-    else
-      #detect using using fall back method
-      isSSD=$(cat /sys/block/${hdd}/queue/rotational 2>/dev/null | grep -c 0)
+
+    isSSD=1
+    isRotational=$(echo "${smartCtlA}" | grep -c "Rotation Rate:")
+    if [ ${isRotational} -gt 0 ]; then
+      isSSD=$(echo "${smartCtlA}" | grep "Rotation Rate:" | grep -c "Solid State Device")
     fi
     echo "isSSD=${isSSD}"
 
@@ -448,6 +499,13 @@ if [ "$1" = "status" ]; then
     echo "datapartition='${hddDataPartition}'"
     echo "hddCandidate='${hdd}'"
     echo "hddPartitionCandidate='${hddDataPartition}'"
+
+    # check temp if possible
+    hddTemp=$(echo "${smartCtlA}" | grep "^Temperature" | head -n 1 | grep -o '[0-9]\+')
+    if [ hddTemp = "" ]; then
+      hddTemp=$(echo "${smartCtlA}" | grep "^194" | tr -s ' ' | cut -d" " -f 10 | grep -o '[0-9]\+')
+    fi
+    echo "hddTemperature=${hddTemp}"
 
     # check if blockchain data is available
     hddBlocksBitcoin=$(ls /mnt/hdd/bitcoin/blocks/blk00000.dat 2>/dev/null | grep -c '.dat')
@@ -466,6 +524,7 @@ if [ "$1" = "status" ]; then
       sizeDataPartition=$(lsblk -o NAME,SIZE -b | grep "${hddDataPartition}" | awk '$1=$1' | cut -d " " -f 2)
       hddGigaBytes=$(echo "scale=0; ${sizeDataPartition}/1024/1024/1024" | bc -l)
     fi
+    hddBytes=${sizeDataPartition}
     echo "hddBytes=${sizeDataPartition}"
     echo "hddGigaBytes=${hddGigaBytes}"
 
@@ -482,21 +541,36 @@ if [ "$1" = "status" ]; then
       datadrive=$(df -h | grep "/dev/${hdd}${nvp}1" | sed -e's/  */ /g' | cut -d" " -f 5)
       storageDrive=$(df -h | grep "/dev/${hdd}${nvp}2" | sed -e's/  */ /g' | cut -d" " -f 5)
       hdd_data_free1Kblocks=$(df -h -k /dev/${hdd}${nvp}1 | grep "/dev/${hdd}${nvp}1" | sed -e's/  */ /g' | cut -d" " -f 4 | tr -dc '0-9')
-      hddUsedInfo="${datadrive} & ${storageDrive}"
+      hddUsedInfo="${datadrive} ${storageDrive}"
     elif [ "${isZFS}" -gt 0 ]; then
       # ZFS calculations
       hdd_used_space=$(($(zpool list -pH | awk '{print $3}')/1024/1024/1024))
       hdd_used_ratio=$((100 * hdd_used_space / hddGigaBytes))
       hdd_data_free1Kblocks=$(($(zpool list -pH | awk '{print $4}') / 1024))
-      hddUsedInfo="${hdd_used_space} (${hdd_used_ratio}%)"
+      hddUsedInfo="${hdd_used_ratio}%"
     else
       # EXT4 calculations
       hdd_used_space=$(df -h | grep "/dev/${hddDataPartitionExt4}" | sed -e's/  */ /g' | cut -d" " -f 3  2>/dev/null)
       hdd_used_ratio=$(df -h | grep "/dev/${hddDataPartitionExt4}" | sed -e's/  */ /g' | cut -d" " -f 5 | tr -dc '0-9' 2>/dev/null)
       hdd_data_free1Kblocks=$(df -h -k /dev/${hddDataPartitionExt4} | grep "/dev/${hddDataPartitionExt4}" | sed -e's/  */ /g' | cut -d" " -f 4 | tr -dc '0-9')
-      hddUsedInfo="${hdd_used_space} (${hdd_used_ratio}%)"
+      hddUsedInfo="${hdd_used_ratio}%"
     fi
-    echo "hddUsedInfo='${hddUsedInfo}'"
+
+    hddTBSize="<1TB"
+    if [ ${hddBytes} -gt 800000000000 ]; then
+      hddTBSize="1TB"
+    fi
+    if [ ${hddBytes} -gt 1800000000000 ]; then
+      hddTBSize="2TB"
+    fi
+    if [ ${hddBytes} -gt 2300000000000 ]; then
+      hddTBSize=">2TB"
+    fi
+    if [ "${hddTemp}" != "" ]; then
+      hddUsedInfo="${hdd_used_ratio}% ${hddTemp}°C"
+    fi
+    echo "hddTBSize='${hddTBSize}'"
+    echo "hddUsedInfo='${hddTBSize} ${hddUsedInfo}'"
     hddDataFreeBytes=$((${hdd_data_free1Kblocks} * 1024))
     hddDataFreeGB=$((${hdd_data_free1Kblocks} / (1024 * 1024)))
     echo "hddDataFreeBytes=${hddDataFreeBytes}"
@@ -520,7 +594,7 @@ if [ "$1" = "status" ]; then
     hddAdapterUSAP=0
     
     # check if force UASP flag is set on sd card
-    if [ -f "/boot/uasp.force" ]; then
+    if [ -f "${raspi_bootdir}/uasp.force" ]; then
       hddAdapterUSAP=1
     fi
     # or UASP is set by config file
@@ -598,6 +672,8 @@ if [ "$1" = "format" ]; then
   # check valid format
   if [ "$2" = "btrfs" ]; then
     >&2 echo "# DATA DRIVE - FORMATTING to BTRFS layout (new)"
+    # check if btrfs-tools are installed
+    apt-get install -y btrfs-progs 1>/dev/null
   elif [ "$2" = "ext4" ]; then
     >&2 echo "# DATA DRIVE - FORMATTING to EXT4 layout (old)"
   else
@@ -695,10 +771,13 @@ if [ "$1" = "format" ]; then
   if [ $wipePartitions -eq 1 ]; then
      # wipe all partitions and write fresh GPT
      >&2 echo "# Wiping all partitions (sfdisk/wipefs)"
+     >&2 echo "# sfdisk"
      sfdisk --delete /dev/${hdd}
      sleep 4
+     >&2 echo "# wipefs"
      wipefs -a /dev/${hdd}
      sleep 4
+     >&2 echo "# lsblk"
      partitions=$(lsblk | grep -c "─${hdd}")
      if [ ${partitions} -gt 0 ]; then
        >&2 echo "# WARNING: partitions are still not clean - try Quick & Dirty"
@@ -710,6 +789,7 @@ if [ "$1" = "format" ]; then
        echo "error='partition cleaning failed'"
        exit 1
      fi
+     >&2 echo "# parted"
      parted -s /dev/${hdd} mklabel gpt 1>/dev/null 1>&2
      sleep 2
      sync
@@ -717,13 +797,19 @@ if [ "$1" = "format" ]; then
 
   # formatting old: EXT4
   if [ "$2" = "ext4" ]; then
+     if [ $(echo "${hdd}" | grep -c "nvme")  = 0 ]; then
+       nvp=""
+     else
+       nvp="p"
+     fi
      # prepare temp mount point
      mkdir -p /tmp/ext4 1>/dev/null
      if [ $ext4IsPartition -eq 0 ]; then
         # write new EXT4 partition
-        >&2 echo "# Creating the one big partition"
-        parted -s /dev/${hdd} mkpart primary ext4 1024KiB 100% 1>&2
+        >&2 echo "# Creating the one big partition - hdd(${hdd})"
+        parted -s /dev/${hdd} mkpart primary ext4 0% 100% 1>&2
         sleep 6
+        >&2 echo "# sync"
         sync
         # loop until the partition gets available
         loopdone=0
@@ -733,7 +819,7 @@ if [ "$1" = "format" ]; then
           >&2 echo "# waiting until the partition gets available"
           sleep 2
           sync
-          loopdone=$(lsblk -o NAME | grep -c ${hdd}1)
+          loopdone=$(lsblk -o NAME | grep -c ${hdd}${nvp}1)
           loopcount=$(($loopcount +1))
           if [ ${loopcount} -gt 10 ]; then
             >&2 echo "# partition failed"
@@ -754,7 +840,7 @@ if [ "$1" = "format" ]; then
      fi
      >&2 echo "# Formatting"
      if [ $ext4IsPartition -eq 0 ]; then
-        mkfs.ext4 -F -L BLOCKCHAIN /dev/${hdd}1 1>/dev/null
+        mkfs.ext4 -F -L BLOCKCHAIN /dev/${hdd}${nvp}1 1>/dev/null
      else
         mkfs.ext4 -F -L BLOCKCHAIN /dev/${hdd} 1>/dev/null
      fi
@@ -1577,9 +1663,9 @@ if [ "$1" = "swap" ]; then
       sed -i "s/^CONF_SWAPFILE=.*/CONF_SWAPFILE=\/mnt\/hdd\/swapfile/g" /etc/dphys-swapfile  
     fi
     sed -i "s/^CONF_SWAPSIZE=/#CONF_SWAPSIZE=/g" /etc/dphys-swapfile 
-    sed -i "s/^#CONF_MAXSWAP=.*/CONF_MAXSWAP=3072/g" /etc/dphys-swapfile
+    sed -i "s/^#CONF_MAXSWAP=.*/CONF_MAXSWAP=10240/g" /etc/dphys-swapfile
     >&2 echo "# Creating SWAP file .."
-    dd if=/dev/zero of=$externalSwapPath count=3072 bs=1MiB 1>/dev/null
+    dd if=/dev/zero of=$externalSwapPath count=10240 bs=1MiB 1>/dev/null
     chmod 0600 $externalSwapPath 1>/dev/null
     >&2 echo "# Activating new SWAP"
     mkswap $externalSwapPath
@@ -1830,18 +1916,18 @@ if [ "$1" = "uasp-fix" ]; then
 
   # check if UASP is already deactivated (on RaspiOS)
   # https://www.pragmaticlinux.com/2021/03/fix-for-getting-your-ssd-working-via-usb-3-on-your-raspberry-pi/
-  cmdlineExists=$(ls /boot/cmdline.txt 2>/dev/null | grep -c "cmdline.txt")
+  cmdlineExists=$(ls ${raspi_bootdir}/cmdline.txt 2>/dev/null | grep -c "cmdline.txt")
   if [ ${cmdlineExists} -eq 1 ] && [ ${#hddAdapterUSB} -gt 0 ] && [ ${hddAdapterUSAP} -eq 0 ]; then
     echo "# Checking for UASP deactivation ..."
-    usbQuirkActive=$(cat /boot/cmdline.txt | grep -c "usb-storage.quirks=")
-    usbQuirkDone=$(cat /boot/cmdline.txt | grep -c "usb-storage.quirks=${hddAdapterUSB}:u")
+    usbQuirkActive=$(cat ${raspi_bootdir}/cmdline.txt | grep -c "usb-storage.quirks=")
+    usbQuirkDone=$(cat ${raspi_bootdir}/cmdline.txt | grep -c "usb-storage.quirks=${hddAdapterUSB}:u")
     if [ ${usbQuirkActive} -gt 0 ] && [ ${usbQuirkDone} -eq 0 ]; then
       # remove old usb-storage.quirks
-      sed -i "s/usb-storage.quirks=[^ ]* //g" /boot/cmdline.txt
+      sed -i "s/usb-storage.quirks=[^ ]* //g" ${raspi_bootdir}/cmdline.txt
     fi 
     if [ ${usbQuirkDone} -eq 0 ]; then
       # add new usb-storage.quirks
-      sed -i "s/^/usb-storage.quirks=${hddAdapterUSB}:u /" /boot/cmdline.txt
+      sed -i "s/^/usb-storage.quirks=${hddAdapterUSB}:u /" ${raspi_bootdir}/cmdline.txt
       # go into reboot to activate new setting
       echo "# DONE deactivating UASP for ${hddAdapterUSB} ... reboot needed"
       echo "neededReboot=1"

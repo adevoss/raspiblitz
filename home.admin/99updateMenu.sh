@@ -80,7 +80,7 @@ Once the LCD is white and no LEDs are blinking anymore:
 - Remove the Power from RaspiBlitz
 - Exchange the old with the new SD card
 - Connect Power back to the RaspiBlitz
-- Follow the instructions on the LCD
+- Login again per SSH or WebUI
 
 Do you have the SD card with the new version image ready
 and do you WANT TO START UPDATE NOW?
@@ -160,7 +160,7 @@ patch()
       if [ $? -eq 0 ]; then
         clear
         echo "REBOOT .."
-        /home/admin/config.scripts/blitz.shutdown.sh reboot
+        sudo /home/admin/config.scripts/blitz.shutdown.sh reboot
         sleep 8
         exit 1
       else
@@ -269,11 +269,28 @@ Do you really want to update LND now?
       if [ ${#error} -gt 0 ]; then
         whiptail --title "ERROR" --msgbox "${error}" 8 30
       else
-        # if loop was installed before reinstall
-        if [ "${loop}" == "on" ]; then
-          sudo -u admin /home/admin/config.scripts/bonus.loop.sh on
+        whiptail \
+         --title " LND update " \
+         --yes-button "Reboot" \
+         --no-button "Skip Reboot" \
+         --yesno \
+"OK LND update is done.
+
+By default a reboot is advised to sync macaroons and the TLS certificate.
+Consider rebooting later manually if encountering any problems.
+      " 12 50
+        if [ $? -eq 0 ]; then
+          clear
+          echo "# REBOOT .."
+          sudo /home/admin/config.scripts/blitz.shutdown.sh reboot
+          sleep 8
+          exit 1
+        else
+          echo "# SKIP REBOOT"
+          echo "# starting the lnd.service .."
+          sudo systemctl start lnd
+          exit 0
         fi
-        /home/admin/config.scripts/blitz.shutdown.sh reboot
         sleep 8
       fi
       ;;
@@ -297,7 +314,28 @@ Do you really want to update LND now?
       if [ ${#error} -gt 0 ]; then
         whiptail --title "ERROR" --msgbox "${error}" 8 30
       else
-        /home/admin/config.scripts/blitz.shutdown.sh reboot
+        whiptail \
+         --title " LND update " \
+         --yes-button "Reboot" \
+         --no-button "Skip Reboot" \
+         --yesno \
+"OK LND update is done.
+
+By default a reboot is advised to sync macaroons and the TLS certificate.
+Consider rebooting later manually if encountering any problems.
+      " 12 50
+        if [ $? -eq 0 ]; then
+          clear
+          echo "# REBOOT .."
+          sudo /home/admin/config.scripts/blitz.shutdown.sh reboot
+          sleep 8
+          exit 1
+        else
+          echo "# SKIP REBOOT"
+          echo "# starting the lnd.service .."
+          sudo systemctl start lnd
+          exit 0
+        fi
         sleep 8
       fi
       ;;
@@ -422,7 +460,28 @@ Do you really want to update Bitcoin Core now?
       error=""
       warn=""
       sudo -u admin /home/admin/config.scripts/bitcoin.update.sh tested
-      /home/admin/config.scripts/blitz.shutdown.sh reboot
+      whiptail \
+        --title " Bitcoin Core update " \
+        --yes-button "Reboot" \
+        --no-button "Skip Reboot" \
+        --yesno \
+"OK Bitcoin Core update is done.
+
+By default a reboot is advised.
+      " 9 40
+      if [ $? -eq 0 ]; then
+        clear
+        echo "# REBOOT .."
+        sudo /home/admin/config.scripts/blitz.shutdown.sh reboot
+        sleep 8
+        exit 1
+      else
+        echo "# SKIP REBOOT"
+        echo "# starting the bitcoind.service .."
+        sudo systemctl start bitcoind
+        exit 0
+      fi
+      sleep 8
       ;;
     RECKLESS)
       whiptail --title "UNTESTED Bitcoin Core update to ${bitcoinLatestVersion}" --yes-button "Cancel" \
@@ -443,11 +502,53 @@ Do you really want to update Bitcoin Core now?
       if [ ${#error} -gt 0 ]; then
         whiptail --title "ERROR" --msgbox "${error}" 8 30
       fi
-      /home/admin/config.scripts/blitz.shutdown.sh reboot
+      whiptail \
+        --title " Bitcoin Core update " \
+        --yes-button "Reboot" \
+        --no-button "Skip Reboot" \
+        --yesno \
+"OK Bitcoin Core update is done.
+
+By default a reboot is advised.
+      " 9 40
+      if [ $? -eq 0 ]; then
+        clear
+        echo "REBOOT .."
+        sudo /home/admin/config.scripts/blitz.shutdown.sh reboot
+        sleep 8
+        exit 1
+      else
+        echo "# SKIP REBOOT"
+        echo "# starting the bitcoind.service .."
+        sudo systemctl start bitcoind
+        exit 0
+      fi
+      sleep 8
       ;;
     CUSTOM)
       sudo -u admin /home/admin/config.scripts/bitcoin.update.sh custom
-      /home/admin/config.scripts/blitz.shutdown.sh reboot
+      whiptail \
+        --title " Bitcoin Core update " \
+        --yes-button "Reboot" \
+        --no-button "Skip Reboot" \
+        --yesno \
+"OK Bitcoin Core update is done.
+
+By default a reboot is advised.
+      " 9 40
+      if [ $? -eq 0 ]; then
+        clear
+        echo "# REBOOT .."
+        sudo /home/admin/config.scripts/blitz.shutdown.sh reboot
+        sleep 8
+        exit 1
+      else
+        echo "# SKIP REBOOT"
+        echo "# starting the bitcoind.service .."
+        sudo systemctl start bitcoind
+        exit 0
+      fi
+      sleep 8
       ;;
   esac
 }
@@ -494,9 +595,9 @@ if [ "${lndg}" == "on" ]; then
 fi
 
 ## Disabled for now until the base image has Python 3.10
-#if [ "${specter}" == "on" ]; then
-#  OPTIONS+=(SPECTER "Update Specter Desktop")
-#fi
+if [ "${specter}" == "on" ]; then
+  OPTIONS+=(SPECTER "Update Specter Desktop")
+fi
 
 if [ "${BTCPayServer}" == "on" ]; then
   OPTIONS+=(BTCPAY "Update BTCPayServer")
@@ -504,10 +605,6 @@ fi
 
 if [ "${sphinxrelay}" == "on" ]; then
   OPTIONS+=(SPHINX "Update Sphinx Server Relay")
-fi
-
-if [ "${homer}" == "on" ]; then
-  OPTIONS+=(HOMER "Update Homer")
 fi
 
 if [ "${mempoolExplorer}" == "on" ]; then
@@ -520,10 +617,6 @@ fi
 
 if [ "${runBehindTor}" == "on" ]; then
   OPTIONS+=(TOR "Update Tor from the Torproject repo")
-fi
-
-if [ "${itchysats}" == "on" ]; then
-  OPTIONS+=(ITCHYSATS "Update ItchySats")
 fi
 
 CHOICE_HEIGHT=$(("${#OPTIONS[@]}/2+1"))
@@ -581,16 +674,10 @@ case $CHOICE in
   TOR)
     sudo /home/admin/config.scripts/tor.network.sh update
     ;;
-  HOMER)
-    /home/admin/config.scripts/bonus.homer.sh update
-    ;;
   MEMPOOL)
     /home/admin/config.scripts/bonus.mempool.sh update
     ;;
   JAM)
     /home/admin/config.scripts/bonus.jam.sh update
-    ;;
-  ITCHYSATS)
-    /home/admin/config.scripts/bonus.itchysats.sh update
     ;;
 esac

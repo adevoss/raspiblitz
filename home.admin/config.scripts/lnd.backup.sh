@@ -169,6 +169,25 @@ if [ ${mode} = "lnd-export" ]; then
     exit 1
   fi
 
+  # if a backup device is connected (and has enogh free space) copy it there
+  source <(/home/admin/config.scripts/blitz.backupdevice.sh status)
+  if [ $isMounted == 1 ]; then
+
+    # get free space in bytes from backup device
+    freeSpace=$(df | grep -m1 "/mnt/backup" | awk '{print $4}')
+
+    # subtract 50MB for safety
+    freeSpace=$(expr ${freeSpace} - 50000000)
+
+    # check if enough space on backup device
+    if [ ${freeSpace} -gt ${byteSize} ]; then
+      echo "# making copy to backup device ..."
+      sudo cp ${downloadPath}/lnd-rescue-${md5checksum}.tar.gz /mnt/backup/lnd-rescue-${md5checksum}.tar.gz
+    else
+      echo "# not enough space on backup device for extra copy'"
+    fi
+  fi
+
   # output result data
   echo "# lnd service is stopped for security"
   echo "filename='${downloadPath}/lnd-rescue-${md5checksum}.tar.gz'"
@@ -369,11 +388,6 @@ if [ ${mode} = "lnd-import-gui" ]; then
   source <(sudo /home/admin/config.scripts/lnd.backup.sh lnd-import ${filename})
 
   # TODO: check if update of LND is needed (see detailes in lnd-import) for edge case
-
-  # turn off auto-unlock if activated because password c might now change
-  if [ "${autoUnlock}" == "on" ]; then
-    /home/admin/config.scripts/lnd.autounlock.sh off
-  fi
   
   # restarting lnd & give final info
   sudo systemctl start lnd
@@ -603,7 +617,7 @@ if [ ${mode} = "seed-import-gui" ]; then
       sudo chown admin:admin /var/cache/raspiblitz/.seed.tmp
 
       # dialog to enter
-      dialog --backtitle "RaspiBlitz - Recover from LND seed" --inputbox "Please enter/paste the SEED WORD LIST:\n(just the words, seperated by spaces, in correct order as numbered)" 9 78 2>/var/cache/raspiblitz/.seed.tmp
+      dialog --backtitle "RaspiBlitz - Recover from LND seed" --inputbox "Please enter/paste the SEED WORD LIST:\n(just the words, separated by spaces, in correct order as numbered)" 9 78 2>/var/cache/raspiblitz/.seed.tmp
       wordstring=$(cat /var/cache/raspiblitz/.seed.tmp | sed 's/[^a-zA-Z0-9 ]//g')
       sudo shred -u /var/cache/raspiblitz/.seed.tmp 2>/dev/null
       echo "processing ..."

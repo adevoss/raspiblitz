@@ -9,7 +9,7 @@ if [ $# -eq 0 ] || [ "$1" = "-h" ] || [ "$1" = "-help" ]; then
   echo "blitz.i2pd.sh install      -> Install i2pd"
   echo "blitz.i2pd.sh on           -> Switch on i2pd"
   echo "blitz.i2pd.sh off          -> Uninstall i2pd"
-  echo "blitz.i2pd.sh addseednodes -> Add all I2P seed nodes from: https://github.com/bitcoin/bitcoin/blob/master/contrib/seeds/nodes_main.txt"
+  echo "blitz.i2pd.sh addseednodes -> Add 21 randonly selected I2P seed nodes from: https://github.com/bitcoin/bitcoin/blob/master/contrib/seeds/nodes_main.txt"
   echo "blitz.i2pd.sh status       -> I2P related logs from bitcoind, bitcoin-cli -netinfo 4 and webconsole access"
   exit 1
 fi
@@ -38,44 +38,44 @@ function add_repo {
   source /etc/os-release
   DIST=$ID
   case $ID in
-    debian|ubuntu|raspbian)
-      if [[ -n $DEBIAN_CODENAME ]]; then
-        VERSION_CODENAME=$DEBIAN_CODENAME
-      fi
-      if [[ -n $UBUNTU_CODENAME ]]; then
-        VERSION_CODENAME=$UBUNTU_CODENAME
-      fi
-      if [[ -z $VERSION_CODENAME ]]; then
-        echo "Couldn't find VERSION_CODENAME in your /etc/os-release file. Did your system supported? Please report issue to me by writing to email: 'r4sas <at> i2pd.xyz'"
-        exit 1
-      fi
-      RELEASE=$VERSION_CODENAME
+  debian | ubuntu | raspbian)
+    if [[ -n $DEBIAN_CODENAME ]]; then
+      VERSION_CODENAME=$DEBIAN_CODENAME
+    fi
+    if [[ -n $UBUNTU_CODENAME ]]; then
+      VERSION_CODENAME=$UBUNTU_CODENAME
+    fi
+    if [[ -z $VERSION_CODENAME ]]; then
+      echo "Couldn't find VERSION_CODENAME in your /etc/os-release file. Did your system supported? Please report issue to me by writing to email: 'r4sas <at> i2pd.xyz'"
+      exit 1
+    fi
+    RELEASE=$VERSION_CODENAME
     ;;
-    *)
-      if [[ -z $ID_LIKE || "$ID_LIKE" != "debian" && "$ID_LIKE" != "ubuntu" ]]; then
-        echo "Your system is not supported by this script. Currently it supports debian-like and ubuntu-like systems."
-        exit 1
-      else
-        DIST=$ID_LIKE
-        case $ID_LIKE in
-          debian)
-            if [[ "$ID" == "kali" ]]; then
-              if [[ "$VERSION" == "2019"* || "$VERSION" == "2020"* ]]; then
-                RELEASE="buster"
-              elif [[ "$VERSION" == "2021"* || "$VERSION" == "2022"* ]]; then
-                RELEASE="bullseye"
-              fi
-            else
-              RELEASE=$DEBIAN_CODENAME
-            fi
-          ;;
-          ubuntu)
-            RELEASE=$UBUNTU_CODENAME
-          ;;
-        esac
-      fi
-      ;;
-    esac
+  *)
+    if [[ -z $ID_LIKE || "$ID_LIKE" != "debian" && "$ID_LIKE" != "ubuntu" ]]; then
+      echo "Your system is not supported by this script. Currently it supports debian-like and ubuntu-like systems."
+      exit 1
+    else
+      DIST=$ID_LIKE
+      case $ID_LIKE in
+      debian)
+        if [[ "$ID" == "kali" ]]; then
+          if [[ "$VERSION" == "2019"* || "$VERSION" == "2020"* ]]; then
+            RELEASE="buster"
+          elif [[ "$VERSION" == "2021"* || "$VERSION" == "2022"* ]]; then
+            RELEASE="bullseye"
+          fi
+        else
+          RELEASE=$DEBIAN_CODENAME
+        fi
+        ;;
+      ubuntu)
+        RELEASE=$UBUNTU_CODENAME
+        ;;
+      esac
+    fi
+    ;;
+  esac
   if [[ -z $RELEASE ]]; then
     echo "Couldn't detect your system release. Please report issue to me by writing to email: 'r4sas <at> i2pd.xyz'"
     exit 1
@@ -92,7 +92,7 @@ function bitcoinI2Pstatus {
   echo "# Follow live with the command:"
   echo "sudo tail -n 1000 -f /mnt/hdd/bitcoin/debug.log | grep i2p"
   echo
-  sudo cat  /mnt/hdd/bitcoin/debug.log | grep i2p
+  sudo cat /mnt/hdd/bitcoin/debug.log | grep i2p
   echo
   echo "# Running the command:"
   echo "bitcoin-cli -netinfo 4"
@@ -107,12 +107,11 @@ function bitcoinI2Pstatus {
   echo
 }
 
-
 echo "# Running: 'blitz.i2pd.sh $*'"
 source /mnt/hdd/raspiblitz.conf
 
 # make sure to be present in PATH
-if ! echo "$PATH" | grep "/usr/sbin"; then
+if ! echo "$PATH" | grep "/usr/sbin" >/dev/null; then
   export PATH=$PATH:/usr/sbin
   echo "PATH=\$PATH:/usr/sbin" | sudo tee -a /etc/profile
 fi
@@ -145,21 +144,20 @@ if [ "$1" = "1" ] || [ "$1" = "on" ]; then
 
   if systemctl is-active --quiet i2pd.service; then
     echo "# i2pd.service is already active."
-    exit 0
+  else
+    echo "# sudo systemctl enable i2pd"
+    sudo systemctl enable i2pd
   fi
-
-  echo "# sudo systemctl enable i2pd"
-  sudo systemctl enable i2pd
 
   echo "# i2pd config"
   /home/admin/config.scripts/blitz.conf.sh set debug tor /mnt/hdd/bitcoin/bitcoin.conf noquotes
   confAdd debug i2p /mnt/hdd/bitcoin/bitcoin.conf
   /home/admin/config.scripts/blitz.conf.sh set i2psam 127.0.0.1:7656 /mnt/hdd/bitcoin/bitcoin.conf noquotes
   /home/admin/config.scripts/blitz.conf.sh set i2pacceptincoming 1 /mnt/hdd/bitcoin/bitcoin.conf noquotes
-  /home/admin/config.scripts/blitz.conf.sh set onlynet tor /mnt/hdd/bitcoin/bitcoin.conf noquotes
+  /home/admin/config.scripts/blitz.conf.sh set onlynet onion /mnt/hdd/bitcoin/bitcoin.conf noquotes
   confAdd onlynet i2p /mnt/hdd/bitcoin/bitcoin.conf
   PASSWORD_B=$(sudo cat /mnt/hdd/bitcoin/bitcoin.conf | grep rpcpassword | cut -c 13-)
-  cat << EOF | sudo tee /etc/i2pd/i2pd.conf
+  cat <<EOF | sudo tee /etc/i2pd/i2pd.conf
 # i2pd settings for the RaspiBlitz
 # for the defaults see:
 # https://github.com/PurpleI2P/i2pd/blob/openssl/contrib/i2pd.conf
@@ -212,6 +210,7 @@ EOF
   # setting value in raspiblitz.conf
   /home/admin/config.scripts/blitz.conf.sh set i2pd "on"
 
+  localip=$(hostname -I | awk '{print $1}')
   echo "# Config: /etc/i2pd/i2pd.conf"
   echo "# i2pd web console: ${localip}:7070"
   echo "# Monitor i2p in bitcoind:"
@@ -223,20 +222,30 @@ fi
 
 if [ "$1" = "addseednodes" ]; then
 
-  /home/admin/config.scripts/blitz.i2pd.sh on
+  if ! sudo -u bitcoin bitcoin-cli -netinfo 4 | grep i2p; then
+    /home/admin/config.scripts/blitz.i2pd.sh on
+  fi
+  echo "Add 21 randomly selected I2P seed nodes from: https://github.com/bitcoin/bitcoin/blob/master/contrib/seeds/nodes_main.txt"
+  echo "Monitor in a new terminal with:"
+  echo "watch sudo -u bitcoin bitcoin-cli -netinfo 4"
+  echo "This will take some time ..."
 
-  echo "Add all I2P seed nodes from: https://github.com/bitcoin/bitcoin/blob/master/contrib/seeds/nodes_main.txt"
+  # Fetch and filter the list of seed nodes
   i2pSeedNodeList=$(curl -sS https://raw.githubusercontent.com/bitcoin/bitcoin/master/contrib/seeds/nodes_main.txt | grep .b32.i2p:0)
-  for i2pSeedNode in ${i2pSeedNodeList}; do
-    bitcoin-cli addnode "$i2pSeedNode" "onetry"
-  done
 
-  echo
-  echo "# Display sudo tail -n 100 /mnt/hdd/bitcoin/debug.log | grep i2p"
-  sudo tail -n 100 /mnt/hdd/bitcoin/debug.log | grep i2p
+  # Shuffle the list and pick the first 21 nodes
+  selectedNodes=$(echo "$i2pSeedNodeList" | shuf | head -n 21)
+
+  # Add each selected node
+  for i2pSeedNode in ${selectedNodes}; do
+    echo "# Add i2p seed node: ${i2pSeedNode} by running:"
+    echo "bitcoin-cli addnode $i2pSeedNode onetry"
+    sudo -u bitcoin bitcoin-cli addnode "$i2pSeedNode" "onetry"
+  done
+  
   echo
   echo "# Display bitcoin-cli -netinfo 4"
-  bitcoin-cli -netinfo 4
+  sudo -u bitcoin bitcoin-cli -netinfo 4
 
   exit 0
 fi
@@ -257,7 +266,7 @@ if [ "$1" = "0" ] || [ "$1" = "off" ]; then
   /home/admin/config.scripts/blitz.conf.sh delete i2psam /mnt/hdd/bitcoin/bitcoin.conf noquotes
   /home/admin/config.scripts/blitz.conf.sh delete i2pacceptincoming /mnt/hdd/bitcoin/bitcoin.conf noquotes
   /home/admin/config.scripts/blitz.conf.sh delete onlynet /mnt/hdd/bitcoin/bitcoin.conf noquotes
-  /home/admin/config.scripts/blitz.conf.sh set onlynet tor /mnt/hdd/bitcoin/bitcoin.conf noquotes
+  /home/admin/config.scripts/blitz.conf.sh set onlynet onion /mnt/hdd/bitcoin/bitcoin.conf noquotes
 
   sudo rm /etc/systemd/system/i2pd.service
 
